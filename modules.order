@@ -1,0 +1,3 @@
+kernel//root/sourcecode/kvm-kmod-3.10.1/x86/kvm.ko
+kernel//root/sourcecode/kvm-kmod-3.10.1/x86/kvm-intel.ko
+kernel//root/sourcecode/kvm-kmod-3.10.1/x86/kvm-amd.ko
