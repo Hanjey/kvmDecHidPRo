@@ -4058,7 +4058,7 @@ errorpage:
 	return 0;
 
 }
-static unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64 *last_spte)
+ unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64 *last_spte)
 {
 	gpa_t cr3_value=vcpu->arch.cr3;
 	//	printk("guest cr3:0x%08x\n",cr3_value);
@@ -4076,7 +4076,7 @@ static unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64
 	}
 	return 1;
 }
-
+EXPORT_SYMBOL_GPL(kvm_get_guest_last_spte);
 static bool isPageNull(struct kvm_vcpu *vcpu,gpa_t start_gpa,gpa_t end_gpa){
 	int value,i,a=1;
 	for(i=0;i<1024;i++){
@@ -4274,7 +4274,7 @@ static __always_inline  int  chen_test_bit(int nr,const volatile unsigned long *
 	 ? constant_test_bit((nr), (addr))	\
 	 : variable_test_bit((nr), (addr)))
 
-int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *vcpu){
+int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *vcpu,u32 mmpfn){
 	struct x86_exception exception;
 	gfn_t temp_gfn;
 	gva_t new_add;
@@ -4313,6 +4313,17 @@ int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *
 		printk("page is not in memory!\n");
 		return 0;
 	}
+	/*change pfndatabase*/
+	 u32 new_gfn=new_spte>>12;	
+	gpa_t pfn_e3_add=mmpfn+new_gfn*0x1c+0xc;
+	printk("mmpfn:%llx\n",mmpfn);
+	printk("pfn_e3_add:%llx\n",pfn_e3_add);
+	u32 pfn_e3;
+	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pfn_e3_add,&pfn_e3,4, NULL);
+	printk("newadd pfn_e3 :%08x\n",pfn_e3);
+  	pfn_e3 |=0x40000000;
+	kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,pfn_e3_add,&pfn_e3,4, NULL);	
+	/*change pfndatabase*/
         printk("new_add_spte:%llx\n",new_spte);
 	printk("new_add=%llx\n",new_add);
 	unsigned int value;

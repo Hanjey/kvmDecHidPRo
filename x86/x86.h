@@ -118,7 +118,8 @@ int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 /*jack code*/
-int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *vcpu);
+unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64 *last_spte);
+int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *vcpu,u32 mmpfn);
  int kvm_alloc_vm_page(gva_t ssdt_base,struct kvm_vcpu *vcpu,u64 *last_spte,int *flag);
 int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,

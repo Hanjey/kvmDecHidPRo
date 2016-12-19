@@ -599,7 +599,7 @@ static void kvm_destroy_dirty_bitmap(struct kvm_memory_slot *memslot)
 {
 	if (!memslot->dirty_bitmap)
 		return;
-	printk("destory bitmap base gfn:%llx\n",memslot->base_gfn);
+//	printk("destory bitmap base gfn:%llx\n",memslot->base_gfn);
 	kvm_kvfree(memslot->dirty_bitmap);
 	memslot->dirty_bitmap = NULL;
 }
@@ -2388,7 +2388,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		if (copy_from_user(&kvm_userspace_mem, argp,
 						sizeof kvm_userspace_mem))
 			goto out;
-		kvm_userspace_mem.flags |= 0x1;
+		//kvm_userspace_mem.flags |= 0x1;
 		r = kvm_vm_ioctl_set_memory_region(kvm, &kvm_userspace_mem);
 		break;
 	}

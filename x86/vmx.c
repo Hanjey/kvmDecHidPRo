@@ -7078,36 +7078,226 @@ static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 					msrs[i].host);
 }
 /*get nonpagedpoolstart*/
-static u32 getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase){
+static int getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,u32 *mmpfn){
 	u32 kdVersionBlock;
 	u32 nonPagedPoolStartadd;
-	u32 nonPagedPoolStart;
-	u32 mmPfnDataBase;
+	u32 mmpfnadd;
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x34, &kdVersionBlock,
                                                 sizeof(kdVersionBlock), NULL)) {
                                 printk("get kdVersionBlock failed !\n");
                                 return 0;
                         }
 	printk("get kdVersionBlock: %08x\n",kdVersionBlock);
+	
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0x138, &nonPagedPoolStartadd,
                                                 sizeof(nonPagedPoolStartadd), NULL)) {
                                 printk("get nonPagedPoolStartadd failed !\n");
                                 return 0;
                         }
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, &mmPfnDataBase,
-                                                sizeof(mmPfnDataBase), NULL)) {
-                                printk("get nonPagedPoolStartadd failed !\n");
+/*	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, mmpfnadd,
+                                                sizeof(mmpfnadd), NULL)) {
+                                printk("get mmPfnDataBaseadd failed !\n");
                                 return 0;
                         }
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPagedPoolStartadd, &nonPagedPoolStart,
-                                                sizeof(nonPagedPoolStart), NULL)) {
+	printk("mmpfnadd:%08x\n",mmpfnadd);*/
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPagedPoolStartadd, nonpage,
+                                                sizeof(nonpage), NULL)) {
                                 printk("get nonPagedPoolStart failed !\n");
                                 return 0;
                         }
-	return nonPagedPoolStart;
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, &mmpfnadd,
+                                                sizeof(mmpfnadd), NULL)) {
+                                printk("get mmPfnDataBaseadd failed !\n");
+                                return 0;
+                        }
+        printk("mmpfnadd:%08x\n",mmpfnadd);
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, mmpfnadd, mmpfn,
+                                                sizeof(mmpfn), NULL)) {
+                                printk("get mmPfnDataBase failed !\n");
+                                return 0;
+                        }
+
+	return 0;
 }
 /*get nonpagedpoolstart end*/
 
+/*get page from knode*/
+typedef struct _SLIST_HEADER{
+	unsigned int next;
+	unsigned short depth;
+	unsigned short sequence;
+}SLIST_HEADER;
+static int getPageFromNonsList(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage){
+	u32 knode_add;
+	 SLIST_HEADER nonPageSlistHead;
+	u32 nextPage;
+	unsigned int data=0x1a2b3c4d;
+	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x5ec,&knode_add,
+                                                sizeof(unsigned int), NULL);
+	printk("knode_add:%08x\n",knode_add);
+	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, knode_add+0x8,&nonPageSlistHead,
+                                                sizeof(SLIST_HEADER), NULL);
+	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPageSlistHead.next,&nextPage,
+                                                sizeof(unsigned int), NULL);
+	printk("first nonpage address:0x%08x\n",nonPageSlistHead.next);
+	printk("second nonpage address:0x%08x\n",nextPage);
+	*nonpage=nonPageSlistHead.next;
+	nonPageSlistHead.next=nextPage;
+	nonPageSlistHead.depth--;
+	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,knode_add+0x8,&nonPageSlistHead,sizeof(nonPageSlistHead), NULL)){
+		printk("pop page error!\n");
+		return 0;
+}
+	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,*nonpage,&data,4,NULL)){
+		printk("write data error!\n");
+		return 0;
+	}
+	return 1;
+}
+/*get page from knode end*/
+/*get idt address*/
+
+static int getIDT(u32 *idtbase){
+	*idtbase=vmcs_readl(GUEST_IDTR_BASE);
+	if(*idtbase!=NULL)
+		return 1;
+	else
+		return 0;
+}
+/*get idt address end*/
+
+
+/*get ssdt address*/
+static int getSSDT(struct kvm_vcpu *vcpu,u64 KpcrBase,ServiceDescriptorTableEntry_t *ssdt){
+	u32 curr_thread;
+        u32 servicetable;
+	 if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x124, &curr_thread,
+                                                sizeof(ServiceDescriptorTableEntry_t), NULL)) {
+                                printk("get current thread failed !\n");
+                                return 0;
+                        }
+         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_thread+0xbc, &servicetable,
+                                                sizeof(ServiceDescriptorTableEntry_t), NULL)) {
+                                printk("get service table failed !\n");
+                                return 0;
+                        }
+         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, servicetable, &vcpu->kvm->service_table,
+                                                sizeof(ServiceDescriptorTableEntry_t), NULL)) {
+                                printk("get service table failed !\n");
+                                return 0;
+                        }
+	ssdt=servicetable;
+	return 1;
+}
+/*get ssdt address end*/
+
+/*create new ssdt*/
+static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ssdt,u32 newSsdtBase){
+	unsigned int *ssdt_con=&vcpu->kvm->vm_info.ssdt;
+	unsigned int r=0;
+	ServiceDescriptorTableEntry_t newSsdt;
+	newSsdt.ServiceTableBase=newBase;
+	newSsdt.ServiceCounterTableBase=ssdt->ServiceCounterTableBase;
+	newSsdt.NumberOfServices=ssdt->NumberOfServices;
+	newSsdt.ParamTableBase=ssdt->ParamTableBase;
+	unsigned int offset=0;
+	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase,&newSsdt,sizeof(ServiceDescriptorTableEntry_t),NULL)){
+                printk("write ssdt structure error!\n");
+                return 0;
+        }
+	offset+=sizeof(ServiceDescriptorTableEntry_t);
+	*ssdt_con=kvm_kvzalloc(1604);
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,ssdt->ServiceTableBase,*ssdt_con,1604, NULL)){
+                printk("read ssdt error!\n");
+                kvm_kvfree(ssdt_con);
+                return 0;
+        }else{
+                printk("read ssdt OK!\n");
+        }	
+	
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset,*ssdt_con,1604, NULL)){
+                printk("write data error,r:%d\n",r);
+                return 0;
+        }else{
+                printk("write ssdt OK!\n");
+                }
+	offset+=1604;
+	return offset;
+
+}
+/*create new ssdt*/
+
+/*create new IDT*/
+static int createNewIdt(struct kvm_vcpu *vcpu,u32 idtBase,u32 newIdtBase){
+	unsigned int *idtcon=&vcpu->kvm->vm_info.idt;
+	*idtcon=kvm_kvzalloc(2048);
+	unsigned int r=0;
+	unsigned int offset=0;
+        if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,idtBase,*idt_con,2048, NULL)){
+                printk("read idt error!\n");
+                kvm_kvfree(idt_con);
+                return 0;
+        }else{
+                printk("read idt OK!\n");
+        }
+	printk("new idt base:0x%08x\n",newIdtBase+offset);
+	 if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newIdtBase,idt_con,2048, NULL)){
+                printk("write IDT error,r:%d\n",r);
+                return 0;
+        }else{
+                printk("write idt OK!\n");
+                }
+	offset+=2048;
+	return offset;
+}
+/*create new IDT end*/
+/*create jmp fun*/
+static int createJmpFun(u32 fastcallAdd,unsigned int newBase,unsigned int offset_base,unsigned int offset_fun){
+	return 1;
+}
+
+/*create jmp fun end*/
+/*get kpcr*/
+static int getKpcrBase(struct kvm_vcpu *vcpu,u64 *kpcrbase){
+	struct kvm_segment seg_fs;
+	vmx_get_segment(vcpu,&seg_fs,VCPU_SREG_FS);
+	if(seg_fs.base!=0x0){
+		*kpcrbase=seg_fs.base;
+		return 1;
+	}
+	printk("get kpcr error!\n");
+	return 0;
+}
+/*get kpcr end*/
+
+/*deploy system*/
+static int deploySystem(struct kvm_vcpu *vcpu){
+	U64 kpcrbase;
+	u32 newBase;
+	u32 idtBase;
+	unsigned int r=0;
+	unsigned int offset=0;
+	 ServiceDescriptorTableEntry_t oldssdt;
+	if(getKpcrBase(vcpu,&kpcrbase)==0)
+		return 0;
+	if(getPageFromNonsList(vcpu,kpcrbase,&newBase)==0)
+		return 0;
+	if(getSSDT(vcpu,kpcrbase,oldssdt)==0)
+		return 0;
+	if(r=createNewSsdt(vcpu,&oldssdt,newBase)==0)
+		return 0;
+	offset+=r;
+	/*set new ssdt*/
+	if(getIDT(&idtBase)==0)
+		return 0;
+	
+	if(r=createNewIdt(vcpu,idtBase,newBase+offset)==0)
+		return 0;
+	/*get new idt*/
+	offset+=r;
+	return 1;
+}
+/*deploy system end*/
 static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7137,7 +7327,10 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	/*jack code*/
 	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
-		printk("guest_sysenter_eip:0x%016x\n",guest_sysenter_eip);
+		printk("guest_sysenter_eip:0x%llx\n",guest_sysenter_eip);
+		u64 last_sp;
+		kvm_get_guest_last_spte(vcpu,guest_sysenter_eip,&last_sp);
+		printk("sysenter eip last_sp:%llx\n",last_sp);
 		struct kvm_segment seg_fs;
 		
 		//servicetablebase = *(u32 *)(*(u32 *)(seg_fs.base+124h)+0xbc);
@@ -7147,10 +7340,13 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 			//ServiceDescriptorTableEntry_t servicetablebase;	
 			u32 curr_thread;
 			u32 servicetable;
-			u32 nonPagedPoolStart;
+			u32 pageadd;
+			u32 mmpfn;
 			printk("fs_base:0x%016x\n",seg_fs.base);	
-			nonPagedPoolStart = getNonPagedPoolStart(vcpu,seg_fs.base);
-			printk("nonpagedPoolStart:%08x\n",nonPagedPoolStart);
+	//		getNonPagedPoolStart(vcpu,seg_fs.base,&nonPagedPoolStart,&mmpfn);
+			getPageFromNonsList(vcpu,seg_fs.base,&pageadd);
+			printk("pageadd:%08x\n",pageadd);
+		//	printk("mmpfn:%08x\n",mmpfn);
 			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, seg_fs.base+0x124, &curr_thread,
 						sizeof(ServiceDescriptorTableEntry_t), NULL)) {
 				printk("get current thread failed !\n");
@@ -7168,11 +7364,8 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
                         }
 			u64 last_spte;
                         //kvm_alloc_vm_page(vcpu->kvm->service_table.ServiceTableBase,vcpu,&last_spte,&vcpu->kvm->is_alloc);
-			kvm_alloc_vm_page1(vcpu->kvm->service_table.ServiceTableBase,nonPagedPoolStart,vcpu);
+	//		kvm_alloc_vm_page1(vcpu->kvm->service_table.ServiceTableBase,nonPagedPoolStart,vcpu,mmpfn);
 			printk("servicetable:0x%08x\n",vcpu->kvm->service_table.ServiceTableBase);
-			//printk("fs_selector:0x%04x\n",seg_fs.selector);
-			//printk("fs_base:0x%016x\n",seg_fs.base);
-			//int desc_index = (seg_fs.base >> 3) & 0xff;
 		}
 	}
 	spin_unlock(p_lock);

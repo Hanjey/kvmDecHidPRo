@@ -395,6 +395,11 @@ typedef struct ServiceDescriptorEntry {
         unsigned int NumberOfServices;
         unsigned char *ParamTableBase;
 } ServiceDescriptorTableEntry_t, *PServiceDescriptorTableEntry_t;
+
+typedef struct _Vm_Info{
+	unsigned int *ssdt;	
+	unsigned int *idt;
+}VmInfo;
 /*jack code*/
 struct kvm {
 	spinlock_t mmu_lock;
@@ -447,9 +452,12 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 	struct list_head devices;
+/*jack code*/
 	ServiceDescriptorTableEntry_t service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
 	int is_alloc;/*jack code*/
+	struct VmInfo vm_info ;
+/*jack code*/
 };
 
 #define kvm_err(fmt, ...) \
