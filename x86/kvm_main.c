@@ -641,12 +641,31 @@ static void kvm_destroy_devices(struct kvm *kvm)
 		dev->ops->destroy(dev);
 	}
 }
+/*jack code free vm info*/
+static int vm_info_free(struct kvm *kvm){
+        if(kvm->vm_info.ssdt!=NULL){
+                kvm_kvfree(kvm->vm_info.ssdt);
+                kvm->vm_info.ssdt=NULL;
+		printk("free ssdt con!\n");
+        }
+        if(kvm->vm_info.idt!=NULL){
+                kvm_kvfree(kvm->vm_info.idt);
+                kvm->vm_info.idt=NULL;
+		printk("free idt con!\n");
+        }
+        return 1;
+}
+/*jack code free vm info*/
+
+
 
 static void kvm_destroy_vm(struct kvm *kvm)
 {
 	int i;
 	struct mm_struct *mm = kvm->mm;
-
+	/*free vm info----jack*/
+        vm_info_free(kvm);
+	/* free vm info----jack*/
 	kvm_arch_sync_events(kvm);
 	raw_spin_lock(&kvm_lock);
 	list_del(&kvm->vm_list);

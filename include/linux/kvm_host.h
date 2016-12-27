@@ -453,10 +453,10 @@ struct kvm {
 	long tlbs_dirty;
 	struct list_head devices;
 /*jack code*/
-	ServiceDescriptorTableEntry_t service_table;/*jack code*/
+	ServiceDescriptorTableEntry_t *service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
 	int is_alloc;/*jack code*/
-	struct VmInfo vm_info ;
+	 VmInfo vm_info;
 /*jack code*/
 };
 

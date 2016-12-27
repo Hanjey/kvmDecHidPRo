@@ -4019,11 +4019,15 @@ static int kvm_get_spte32(struct kvm_vcpu *vcpu,gva_t addr,u64 *spte,gpa_t cr3_v
 
    }
    */
-static int kvm_page_is_bigpage(gva_t gva){
-
-
+void *vmx_alloc(unsigned long size){
+	return kvm_kvzalloc(size);	
 }
 
+EXPORT_SYMBOL_GPL(vmx_alloc);
+void vmx_free(const void *addr){
+	 kvm_kvfree(addr);
+}
+EXPORT_SYMBOL_GPL(vmx_free);
 static u64 kvm_get_spte_pae(struct kvm_vcpu *vcpu,gva_t addr,u64 *spte,gpa_t cr3_value){
 	unsigned int offset_1=addr>>30;
 	unsigned int offset_2=addr>>21 & 0x1ff;
