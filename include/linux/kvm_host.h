@@ -395,7 +395,10 @@ typedef struct ServiceDescriptorEntry {
         unsigned int NumberOfServices;
         unsigned char *ParamTableBase;
 } ServiceDescriptorTableEntry_t, *PServiceDescriptorTableEntry_t;
-
+typedef struct _Sysenter_Eip{
+	unsigned int oldeip;
+	unsigned int neweip;
+}SysenterEip;
 typedef struct _Vm_Info{
 	unsigned int *ssdt;	
 	unsigned int *idt;
@@ -455,8 +458,10 @@ struct kvm {
 /*jack code*/
 	ServiceDescriptorTableEntry_t *service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
+	int is_svm;
 	int is_alloc;/*jack code*/
 	 VmInfo vm_info;
+	SysenterEip sysenter_eip;
 /*jack code*/
 };
 

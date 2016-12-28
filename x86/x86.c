@@ -4081,154 +4081,8 @@ errorpage:
 	return 1;
 }
 EXPORT_SYMBOL_GPL(kvm_get_guest_last_spte);
-static bool isPageNull(struct kvm_vcpu *vcpu,gpa_t start_gpa,gpa_t end_gpa){
-	int value,i,a=1;
-	for(i=0;i<1024;i++){
-		kvm_read_guest(vcpu->kvm,start_gpa,&value,4);
-		if(value==0){
-			start_gpa+=4;
-			if(start_gpa>(end_gpa-4))
-				break;
-			continue;
-		}else{
-			a=0;
-			break;
-		}
-	}
-	return a==1;
-}
-/*
-   int kvm_write_to_gfn(gfn_t ssdt_gfn,struct kvm_vcpu *vcpu){
-   struct kvm_memory_slot *memslot;
-   memslot = gfn_to_memslot(kvm, ssdt_gfn);
-   int i;
-   int index=ssdt_gfn-memslot->base_gfn;
-   unsigned long base_gfn=memslot->base_gfn;
-   if(memslot->dirty_bitmap){
-   for(i=0;i<memslot->npages;i++){
-   printk();
-   }
-   }	
-   }
-   */
 static gva_t newssdt_gva;
 int kvm_alloc_vm_page(gva_t ssdt_base,struct kvm_vcpu *vcpu,u64 *last_spte,int *flag){
-	int pagecount=0,i=0,r=0;
-	//unsigned int test=0xa1b2c3d4;
-	unsigned long gvn_start=ssdt_base;
-	u64 sptec;
-	//	unsigned long gvn_start=ssdt_base&0xfffff000;
-	//	unsigned long gvn_offset=ssdt_base&0xfff;
-	//	printk("gvn_offset:0x%08x\n",gvn_offset);
-	//	kvm_get_guest_last_spte(vcpu,gvn_start,last_spte);
-	//unsigned int temp=(*last_spte)&0xfffff000;
-	/*bool isnull;
-	  isnull  = isPageNull(vcpu,temp,temp+4096);
-	  printk("ssdtpage is null:%d\n",isnull);
-	  printk("last_spte:0x%016x\n",*last_spte);
-	  unsigned long first_item;
-	  u64 ssdt_add=(*last_spte)&(~0xfff) | (u64)gvn_offset;
-	  printk("ssdt_add:0x%08x\n",ssdt_add);
-	  kvm_read_guest(vcpu->kvm,ssdt_add,&first_item,4);
-	  printk("first item:0x%08x\n",first_item);*/
-	/**/
-	//unsigned int start_page=0;
-	struct x86_exception exception;
-	unsigned int data=0xa1b2c3d4;
-	printk("ssdt virtual address:0x%016x\n",gvn_start);
-	gvn_start = (gvn_start+0x276e000)&~0xfff;
-	printk("ssdt + 0x2dc5000:0x%016x\n",gvn_start);
-	/*write to hva*/
-	unsigned long addr;
-	kvm_get_guest_last_spte(vcpu,gvn_start,last_spte);
-	sptec=(*last_spte)&~0xfff;
-	printk("target gfn:%016x\n",sptec);
-	addr = gfn_to_hva(vcpu->kvm, sptec);
-	if (kvm_is_error_hva(addr))
-		printk("error hva!%08x\n",addr);
-	else
-		r = __copy_to_user((void __user *)addr, &data, 4);
-	if(r)
-		printk("copy to user error!\n");
-	/*end write to hva*/
-	/*test gva valid*/
-
-	gpa_t tmp_gpa;
-	int isright=0;
-	for(i=0;i<100;i++){
-		tmp_gpa=vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gvn_start,PFERR_WRITE_MASK,&exception);
-		if(tmp_gpa == UNMAPPED_GVA){
-			gvn_start+=4096;			
-			continue;
-		}
-		else{
-			isright=1;
-			printk("current address:0x%016x-------corrphyadd:0x%016x\n",gvn_start,tmp_gpa);
-			break;
-		}
-	}	
-	if(isright)
-		printk("get it!\n");
-	//r=kvm_write_guest(vcpu->kvm,tmp_gpa, &data, 4);
-	if(r<0){
-		printk("write need IO!\n");
-	}else   
-		printk("write OK!\n");
-
-	/*end test gva valid*/
-	/*remove write access*/
-	u64 sptep=kvm_get_guest_last_spte(vcpu,gvn_start,last_spte);
-	printk("target page sptep address:%016x\n",sptep);
-	sptec=*last_spte;
-	printk("target_original_phy:0x%016x\n",sptec);
-	sptec &= ~0x2;
-	kvm_write_guest(vcpu->kvm, sptep, &sptec, 8);
-	kvm_get_guest_last_spte(vcpu,gvn_start,last_spte);
-	printk("after change write access:%016x\n",*last_spte);
-	/*end remove write access*/
-	/*write guest*/
-	/*if((r=kvm_clear_guest_page(vcpu->kvm,(sptec&(~0xfff)),0,4096))<0){
-	  printk("clear error,r:%d\n",r);
-	  }*/
-	if(newssdt_gva==0)
-		newssdt_gva=gvn_start;
-	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newssdt_gva,&data,4, &exception)){
-		*flag=1;
-		printk("write data error,r:%d\n",r);
-		return 1;
-
-	}else{
-		*flag=1;
-		printk("write it OK!\n");
-	}
-	unsigned int test=0;
-	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,gvn_start,&test,4, NULL)){
-		printk("read data error");
-	}else{
-		printk("data after write:0x%08x\n",test);
-	}
-	/*end write guest*/
-	/*unsigned int data=0xa1b2c3d4;
-	  sptec &= ~0xfff;
-	  printk("final write address:0x%016x\n",sptec);*/
-	//	kvm_write_guest(vcpu->kvm,sptec, &data, 4);
-	/**/
-	/*
-	   for(gvn_start=gvn_start;gvn_start<0x87000000;gvn_start+=4096){
-	   kvm_get_guest_last_spte(vcpu,gvn_start,last_spte);
-	   start_page=(*last_spte);
-	   printk("phy_add:%llx,virt_add:%llx\n",start_page,gvn_start);
-	   if((i++)==100) break;
-	   if((*last_spte)&0x1==0) continue;
-	   if((isnull=isPageNull(vcpu,start_page,start_page+4096)==1)){
-	//kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,ssdt_base,&first_item,4, NULL);
-	break;	
-	}
-	else{
-	continue;
-	}
-	}*/
-	//printk("find %d pages!\n",i);
 	return 1;
 }
 EXPORT_SYMBOL_GPL(kvm_alloc_vm_page);
@@ -4250,13 +4104,6 @@ void foreachSlotBitmap(struct kvm_memslots *slots){
 	struct kvm_memory_slot *memslot;
 	kvm_for_each_memslot(memslot, slots){
 		viewSlotInfo(memslot);
-		/*printk("slot base_gfn:0x%llx\n",memslot->base_gfn);
-		  printk("slot npages:0x%08x\n",memslot->npages);
-		  if(memslot->dirty_bitmap){
-		  printk("%d slot bitmap:%p\n",memslot->id,memslot->dirty_bitmap);
-		  }
-		  else
-		  printk("%d slot bitmap is NULL\n",memslot->id);*/
 	}
 }
 
@@ -4340,45 +4187,6 @@ int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *
 	printk("write OK!\n");
 	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,new_add,&value,4, NULL);
 	printk("value=%08x\n",value);
-	/*get ssdt content*/
-//	unsigned long *ssdt_con=kvm_kvzalloc(1604);
-/*	unsigned int value;
-	for(i=0;i<401;i++){
-		kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,ssdt_base,&value,4, NULL);
-		printk("%08x\n",value);
-		if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,new_add,&value,4, NULL)){
-               		 printk("write data error,r:%d\n",r);
-                	return -1;
-        	}else{
-			ssdt_base+=4;
-			new_add+=4;
-                }
-	}*/
-	/*if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,ssdt_base,ssdt_con,1604, NULL)){
-                printk("read ssdt error!\n");
-		kvm_kvfree(ssdt_con);
-		return -1;
-        }else{
-                printk("read ssdt OK!\n");
-        }*/
-	/*get ssdt content*/
-	/*write to guest*/
-	/*if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,new_add,ssdt_con,1604, NULL)){
-                printk("write data error,r:%d\n",r);
-                return -1;
-        }else{
-                printk("write it OK!\n");
-        	}*/
-	
-/*	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,new_add,ssdt_con,2048, NULL)){
-                printk("write data error,r:%d\n",r);
-                return -1;
-
-        }else{
-                printk("write it OK!\n");
-        }*/
-	/*write to guest*/
-	/*remove write access*/
         u64 last_spte;
         u64 sptec;
         u64 sptep=kvm_get_guest_last_spte(vcpu,new_add,&last_spte);
@@ -6059,7 +5867,7 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 
 	return 1;
 }
-
+/*open security vm according different parm*/
 int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
@@ -6088,7 +5896,7 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		ret = -KVM_EPERM;
 		goto out;
 	}
-
+	/*add Return values for hypercalls  in kvm_para.h*/
 	switch (nr) {
 		case KVM_HC_VAPIC_POLL_IRQ:
 			ret = 0;
@@ -6428,20 +6236,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		set_debugreg(vcpu->arch.eff_db[3], 3);
 	}
 	trace_kvm_entry(vcpu->vcpu_id);
-	/*jack code
-	  u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
-	  printk(KERN_WARNING"guest_sysenter_eip:0x%016x\n",guest_sysenter_eip);
-	  if(vcpu->kvm->is_alloc==0){
-	  struct kvm_segment seg_fs;
-	  kvm_get_segment(vcpu,&seg_fs,VCPU_SREG_FS);
-	  if(1){
-	  vcpu->kvm->is_alloc=1;
-	  printk(KERN_WARNING"fs_selector:0x%04x\n",seg_fs.selector);
-	  printk(KERN_WARNING"fs_base:0x%016x\n",seg_fs.base);
-	//int desc_index = (seg_fs.base >> 3) & 0xff;
-	}
-	}
-	jack code*/
 	kvm_x86_ops->run(vcpu);
 
 	/*

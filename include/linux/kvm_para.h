@@ -48,6 +48,11 @@
 #define KVM_EFAULT		EFAULT
 #define KVM_E2BIG		E2BIG
 #define KVM_EPERM		EPERM
+/*add by jack*/
+#define KVM_ADD_PROCESS 20
+#define KVM_OPEN_VM 30
+
+
 
 #define KVM_HC_VAPIC_POLL_IRQ		1
 #define KVM_HC_MMU_OP			2

@@ -5148,7 +5148,7 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 {
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data;
-	printk("read msr!\n");
+	printk("read msr %08x\n",ecx);
 	if (vmx_get_msr(vcpu, ecx, &data)) {
 		trace_kvm_msr_read_ex(ecx);
 		kvm_inject_gp(vcpu, 0);
@@ -5222,7 +5222,7 @@ static int handle_halt(struct kvm_vcpu *vcpu)
 	skip_emulated_instruction(vcpu);
 	return kvm_emulate_halt(vcpu);
 }
-
+/*handle vm call*/
 static int handle_vmcall(struct kvm_vcpu *vcpu)
 {
 	skip_emulated_instruction(vcpu);
@@ -7330,6 +7330,7 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
                 printk("copy fastcall error:%d\n",r);
                 return 0;
         }
+	vcpu->kvm->sysenter_eip.neweip=newBase+offset;
 	*newfun=newBase+offset;
 	printk("code0:%08x\n",newBase+offset);
 	offset+=165;
@@ -7406,6 +7407,20 @@ static void vm_info_free_infail(struct kvm_vcpu *vcpu){
 		
 }
 static u32 newfun=0,newidt=0;
+/*set msr bitmap*/
+static int setMsrBitMap(unsigned long *msr_bitmap,u32 msr,int type){
+	int f = sizeof(unsigned long);
+	if (!cpu_has_vmx_msr_bitmap())
+		return;
+	if (type & MSR_TYPE_R)
+			/* read-low */
+			__set_bit(msr, msr_bitmap + 0x000 / f);
+
+	if (type & MSR_TYPE_W)
+			/* write-low */
+			__set_bit(msr, msr_bitmap + 0x800 / f);
+}
+/*set msr bitmap*/
 static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7434,7 +7449,8 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//static u32 newfun,newidt;
 	spin_lock(p_lock);	
 	/*jack code*/
-	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
+	/*u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
+ * 	vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
 		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1)
 			vcpu->kvm->is_alloc=1;
@@ -7444,10 +7460,28 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	spin_unlock(p_lock);
 	if(vcpu->kvm->is_alloc==1&&newfun!=0){
            		setNewSsdt((u64)newfun);
+	}*/
+	spin_unlock(p_lock);
+	/*test msr*/
+	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
+	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
+	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
+		//printk("not use msr bitmap,set it!\n");
+		//vm_exec |=CPU_BASED_USE_MSR_BITMAPS;
+		//vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 	}
-	if(vcpu->kvm->is_alloc==1&&newidt!=0){
+	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
+		//printk("use msr bitmap!\n");
+		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
+		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
+		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
+		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
+	//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
+	}
+	/*test msr*/
+//	if(vcpu->kvm->is_alloc==1&&newidt!=0){
 		//setNewIDT(newidt);
-	}
+//	}
 	/*jack code*/
 	/* When single-stepping over STI and MOV SS, we must clear the
 	 * corresponding interruptibility bits in the guest state. Otherwise
