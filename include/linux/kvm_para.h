@@ -49,8 +49,10 @@
 #define KVM_E2BIG		E2BIG
 #define KVM_EPERM		EPERM
 /*add by jack*/
-#define KVM_ADD_PROCESS 20
-#define KVM_OPEN_VM 30
+#define KVM_ADD_SE_PROCESS 20
+#define KVM_ENABLE_SECURITY 21
+#define KVM_DISABLE_SECURITY 22
+#define KVM_REMOVE_SE_PROCESS 23
 
 
 

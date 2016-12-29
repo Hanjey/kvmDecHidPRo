@@ -514,6 +514,8 @@ static struct kvm *kvm_create_vm(unsigned long type)
 	/*add by jack*/
 	kvm->is_alloc=0;
 	kvm->is_svm=0;
+	kvm->se_pro_list.u1.pro_count=0;
+	kvm->se_pro_list.pro_list.next=kvm->se_pro_list.pro_list.prev=&kvm->se_pro_list.pro_list;
 	/*add by jack*/
 	r = kvm_arch_init_vm(kvm, type);
 	if (r)

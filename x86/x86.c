@@ -5867,6 +5867,82 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 
 	return 1;
 }
+/*jack code*/
+
+/*operation of list*/
+/*insert to list head*/
+static int insert_list(struct list_head *head,struct list_head *node){
+	node->next=head->next;
+	node->prev=head;
+	head->next=node;
+	return 1;
+	
+}
+static int del_list(struct list_head *head,struct list_head *node){
+	if(head->next==head)
+		return 0;
+	struct list_head *temp,*p;
+	temp=head->next;
+	p=head;
+	while(temp!=head){
+		if(temp==node){
+			p->next=temp->next;
+			temp->next->prev=p;		
+			break;
+		}
+		p=p->next;
+		temp=temp->next;
+	}
+}
+static int foreach_process_list(struct list_head *head){
+	struct list_head *p=head->next;
+	SeProcess *temp;
+	int i=0;
+	while(p!=head){
+		temp=(SeProcess *)p;
+		printk("[%d] process id %d\n",i,temp->u1.pro_id);
+		p=p->next;
+		i++;
+	}
+}
+static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid){
+	struct list_head *p=head->next;
+        SeProcess *temp;
+        while(p!=head){
+                temp=(SeProcess *)p;
+		if(temp->u1.pro_id==pid)
+			return p;
+                p=p->next;
+        }
+	return NULL;
+
+}
+/*operation by vm*/
+static void add_se_process(int sepid,struct kvm_vcpu *vcpu){
+	SeProcess sepro;
+	sepro.u1.pro_id=sepid;
+	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro.pro_list);
+}
+static void remove_se_process(int sepid,struct kvm_vcpu *vcpu){
+	struct list_head *p;
+	p=find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,sepid);
+	del_list(&vcpu->kvm->se_pro_list.pro_list,p);	
+}
+
+static void enable_security_vm(struct kvm_vcpu *vcpu){
+	vcpu->kvm->is_svm=1;
+}
+
+static void disable_security_vm(struct kvm_vcpu *vcpu){
+	vcpu->kvm->is_svm=0;
+}
+
+
+
+/*jack code*/
+
+
+
 /*open security vm according different parm*/
 int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
@@ -5897,9 +5973,22 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		goto out;
 	}
 	/*add Return values for hypercalls  in kvm_para.h*/
+	/*ecx is pid*/
 	switch (nr) {
 		case KVM_HC_VAPIC_POLL_IRQ:
 			ret = 0;
+			break;
+		case KVM_ADD_SE_PROCESS:
+			add_se_process(a1,vcpu);
+			break;
+		case KVM_REMOVE_SE_PROCESS:
+			remove_se_process(a1,vcpu);
+			break;
+		case KVM_ENABLE_SECURITY:
+			enable_security_vm(vcpu);
+			break;
+		case KVM_DISABLE_SECURITY:
+			disable_security_vm(vcpu);
 			break;
 		default:
 			ret = -KVM_ENOSYS;

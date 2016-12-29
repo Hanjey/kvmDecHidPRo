@@ -403,6 +403,14 @@ typedef struct _Vm_Info{
 	unsigned int *ssdt;	
 	unsigned int *idt;
 }VmInfo;
+typedef struct _Se_Process{
+	struct list_head pro_list;
+	union{
+		int pro_id;
+		int pro_count;
+	}u1;
+}SeProcess;
+
 /*jack code*/
 struct kvm {
 	spinlock_t mmu_lock;
@@ -461,6 +469,7 @@ struct kvm {
 	int is_svm;
 	int is_alloc;/*jack code*/
 	 VmInfo vm_info;
+	SeProcess se_pro_list;
 	SysenterEip sysenter_eip;
 /*jack code*/
 };

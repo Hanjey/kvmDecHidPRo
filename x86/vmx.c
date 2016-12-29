@@ -5148,7 +5148,7 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 {
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data;
-	printk("read msr %08x\n",ecx);
+//	printk("read msr %08x\n",ecx);
 	if (vmx_get_msr(vcpu, ecx, &data)) {
 		trace_kvm_msr_read_ex(ecx);
 		kvm_inject_gp(vcpu, 0);
@@ -7147,9 +7147,10 @@ static int getPageFromNonsList(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage){
 		printk("write data error!\n");
 		return 0;
 	}*/
-	if((kvm_clear_guest_page(vcpu->kvm,*nonpage,0,4096))<0){
+/*	if((kvm_clear_guest_page(vcpu->kvm,*nonpage,0,4096))<0){
             printk("clear error\n");
            }
+*/
 
 	return 1;
 		
@@ -7277,6 +7278,7 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	unsigned int memory_eip;
 	unsigned int memory_rep;
 	unsigned int r=0,offset=0;
+	
 	/*
  	*code0 159 bytes of original function + push return 	
  	*jmpcode 21 bytes if target is ssdt or shadow ssdt
@@ -7335,9 +7337,32 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	printk("code0:%08x\n",newBase+offset);
 	offset+=165;
 	
+	/*set KISystemService*/
+	char code_sys2[9]={0x89,0x7d,0x04,0xfb,0xe9,0x00,0x00,0x00,0x00};
+	*(u32 *)&code_sys2[5]=*newfun+0x8f-(newBase+offset+9);
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase+offset,code_sys2,9, NULL)){
+                printk("set sys service jmp error:%d\n",r);
+                return 0;
+        }
+	printk("code_sys2:%08x\n",newBase+offset);
+	offset+=9;
+        /*set KISystemService*/
 	return offset;
 }
-
+static int setSysServiceJmp(struct kvm_vcpu *vcpu,u32 fastcalladd,u32 newfun){
+	/*set KISystemService*/
+	unsigned int r=0;
+        u32 kisysadd=fastcalladd-0xd2+0x7b;
+	/*code_sys code1 in KiSystemService*/
+        char code_sys[9]={0x68,0x00,0x00,0x00,0x00,0xc3,0x90,0x90,0x90};
+        *(u32 *)&code_sys[1]=newfun;
+        if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,kisysadd,code_sys,9, NULL)){
+                printk("copy fastcall error:%d\n",r);
+                return 0;
+        }
+        /*set KISystemService*/
+	return 1;
+}
 /*create jmp fun end*/
 /*get kpcr*/
 static int getKpcrBase(struct kvm_vcpu *vcpu,u64 *kpcrbase){
@@ -7351,6 +7376,31 @@ static int getKpcrBase(struct kvm_vcpu *vcpu,u64 *kpcrbase){
 	printk("get kpcr error!\n");
 	return 0;
 }
+/*clear old ssdt*/
+static int clearOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
+	unsigned int  temp=0xFFFFFFFF;
+	int r;
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,
+				       ssdtbase, &temp,
+				       4,
+	     			       NULL)){
+		printk("clear old ssdt error!\n");
+		return 0;
+	}
+	printk("clear old ssdt OK!\n");
+	return 1;
+}
+static int restoreOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
+	int r;
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,
+                                       ssdtbase,vcpu->kvm->vm_info.ssdt,
+                                       1604,
+                                       NULL)){
+		printk("restore ssdt error!\n");
+	}
+}
+
+
 /*get kpcr end*/
 static void setNewSsdt(u64 newfun){
 	vmcs_writel(GUEST_SYSENTER_EIP, newfun);
@@ -7358,6 +7408,7 @@ static void setNewSsdt(u64 newfun){
 static void setNewIDT(u32 idtbase){
 	vmcs_writel(GUEST_IDTR_BASE, idtbase);	
 }
+
 /*deploy system*/
 static int deploySecuritySystem(struct kvm_vcpu *vcpu,u32 sysenter_tip,u32 *newfun,u32 *idtbase){
 	u64 kpcrbase;
@@ -7376,14 +7427,14 @@ static int deploySecuritySystem(struct kvm_vcpu *vcpu,u32 sysenter_tip,u32 *newf
 		return 0;
 	offset+=r;
 	printk("offset after create SSDT :%d\n",offset);
-	if(getIDT(&idtBase)==0)
-		return 0;
+//	if(getIDT(&idtBase)==0)
+//		return 0;
 	
-	if((r=createNewIdt(vcpu,idtBase,newBase+offset))==0)
-		return 0;
-	*idtbase=newBase+offset;
-	offset+=r;		
-	printk("offset after create IDT :%d\n",offset);
+//	if((r=createNewIdt(vcpu,idtBase,newBase+offset))==0)
+//		return 0;
+//	*idtbase=newBase+offset;
+//	offset+=r;		
+//	printk("offset after create IDT :%d\n",offset);
 	if((r=createJmpFun(vcpu,sysenter_tip,newBase+offset,newBase,0x99,newfun))==0){
                 return 0;
         }
@@ -7421,6 +7472,7 @@ static int setMsrBitMap(unsigned long *msr_bitmap,u32 msr,int type){
 			__set_bit(msr, msr_bitmap + 0x800 / f);
 }
 /*set msr bitmap*/
+ int clearold=0;
 static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7449,19 +7501,29 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//static u32 newfun,newidt;
 	spin_lock(p_lock);	
 	/*jack code*/
-	/*u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
- * 	vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
+	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
+  	vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
-		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1)
+		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1){
+			printk("newfun:%08x\n",newfun);
 			vcpu->kvm->is_alloc=1;
+			printk("service table base:%08x\n",vcpu->kvm->service_table->ServiceTableBase);
+			//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+		}
 		else
 			vm_info_free_infail(vcpu);	
 	}
 	spin_unlock(p_lock);
 	if(vcpu->kvm->is_alloc==1&&newfun!=0){
            		setNewSsdt((u64)newfun);
-	}*/
-	spin_unlock(p_lock);
+			//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+	}
+	 if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
+                        //clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+                        setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
+			clearold=1;
+	}
+//	spin_unlock(p_lock);
 	/*test msr*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
@@ -7474,7 +7536,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		//printk("use msr bitmap!\n");
 		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
 		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
-		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
+	//	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
 	//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
 	}
