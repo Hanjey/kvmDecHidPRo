@@ -5148,7 +5148,8 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 {
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data;
-//	printk("read msr %08x\n",ecx);
+	
+	//	printk("read msr %08x\n",ecx);
 	if (vmx_get_msr(vcpu, ecx, &data)) {
 		trace_kvm_msr_read_ex(ecx);
 		kvm_inject_gp(vcpu, 0);
@@ -5156,7 +5157,11 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 	}
 
 	trace_kvm_msr_read(ecx, data);
-
+	/*vcpu->kvm->is_svm==1&&vcpu->kvm->is_alloc==1*/
+	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
+                data=(u64)vcpu->kvm->sysenter_eip.oldeip;
+		printk("read 176h,cheat it!\n");
+        }
 	/* FIXME: handling of bits 32:63 of rax, rdx */
 	vcpu->arch.regs[VCPU_REGS_RAX] = data & -1u;
 	vcpu->arch.regs[VCPU_REGS_RDX] = (data >> 32) & -1u;
@@ -5170,7 +5175,12 @@ static int handle_wrmsr(struct kvm_vcpu *vcpu)
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data = (vcpu->arch.regs[VCPU_REGS_RAX] & -1u)
 		| ((u64)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u) << 32);
-
+	/*jack code*/
+	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
+                data=(u64)vcpu->kvm->sysenter_eip.neweip;
+                printk("write 176h,cheat it!\n");
+        }
+	/*jack code*/
 	msr.data = data;
 	msr.index = ecx;
 	msr.host_initiated = false;
@@ -7078,39 +7088,39 @@ static int getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,
 	u32 nonPagedPoolStartadd;
 	u32 mmpfnadd;
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x34, &kdVersionBlock,
-                                                sizeof(kdVersionBlock), NULL)) {
-                                printk("get kdVersionBlock failed !\n");
-                                return 0;
-                        }
+				sizeof(kdVersionBlock), NULL)) {
+		printk("get kdVersionBlock failed !\n");
+		return 0;
+	}
 	printk("get kdVersionBlock: %08x\n",kdVersionBlock);
-	
+
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0x138, &nonPagedPoolStartadd,
-                                                sizeof(nonPagedPoolStartadd), NULL)) {
-                                printk("get nonPagedPoolStartadd failed !\n");
-                                return 0;
-                        }
-/*	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, mmpfnadd,
-                                                sizeof(mmpfnadd), NULL)) {
-                                printk("get mmPfnDataBaseadd failed !\n");
-                                return 0;
-                        }
-	printk("mmpfnadd:%08x\n",mmpfnadd);*/
+				sizeof(nonPagedPoolStartadd), NULL)) {
+		printk("get nonPagedPoolStartadd failed !\n");
+		return 0;
+	}
+	/*	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, mmpfnadd,
+		sizeof(mmpfnadd), NULL)) {
+		printk("get mmPfnDataBaseadd failed !\n");
+		return 0;
+		}
+		printk("mmpfnadd:%08x\n",mmpfnadd);*/
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPagedPoolStartadd, nonpage,
-                                                sizeof(nonpage), NULL)) {
-                                printk("get nonPagedPoolStart failed !\n");
-                                return 0;
-                        }
+				sizeof(nonpage), NULL)) {
+		printk("get nonPagedPoolStart failed !\n");
+		return 0;
+	}
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, &mmpfnadd,
-                                                sizeof(mmpfnadd), NULL)) {
-                                printk("get mmPfnDataBaseadd failed !\n");
-                                return 0;
-                        }
-        printk("mmpfnadd:%08x\n",mmpfnadd);
+				sizeof(mmpfnadd), NULL)) {
+		printk("get mmPfnDataBaseadd failed !\n");
+		return 0;
+	}
+	printk("mmpfnadd:%08x\n",mmpfnadd);
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, mmpfnadd, mmpfn,
-                                                sizeof(mmpfn), NULL)) {
-                                printk("get mmPfnDataBase failed !\n");
-                                return 0;
-                        }
+				sizeof(mmpfn), NULL)) {
+		printk("get mmPfnDataBase failed !\n");
+		return 0;
+	}
 
 	return 0;
 }
@@ -7124,36 +7134,36 @@ typedef struct _SLIST_HEADER{
 }SLIST_HEADER;
 static int getPageFromNonsList(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage){
 	u32 knode_add;
-	 SLIST_HEADER nonPageSlistHead;
+	SLIST_HEADER nonPageSlistHead;
 	u32 nextPage;
 	unsigned int data=0x1a2b3c4d;
 	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x5ec,&knode_add,
-                                                sizeof(unsigned int), NULL);
+			sizeof(unsigned int), NULL);
 	printk("knode_add:%08x\n",knode_add);
 	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, knode_add+0x8,&nonPageSlistHead,
-                                                sizeof(SLIST_HEADER), NULL);
+			sizeof(SLIST_HEADER), NULL);
 	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPageSlistHead.next,&nextPage,
-                                                sizeof(unsigned int), NULL);
+			sizeof(unsigned int), NULL);
 	printk("first nonpage address:0x%08x\n",nonPageSlistHead.next);
-       //	printk("second nonpage address:0x%08x\n",nextPage);
+	//	printk("second nonpage address:0x%08x\n",nextPage);
 	*nonpage=nonPageSlistHead.next;
 	nonPageSlistHead.next=nextPage;
 	nonPageSlistHead.depth--;
 	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,knode_add+0x8,&nonPageSlistHead,sizeof(nonPageSlistHead), NULL)){
 		printk("pop page error!\n");
 		return 0;
-}
+	}
 	/*if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,*nonpage,&data,4,NULL)){
-		printk("write data error!\n");
-		return 0;
-	}*/
-/*	if((kvm_clear_guest_page(vcpu->kvm,*nonpage,0,4096))<0){
-            printk("clear error\n");
-           }
-*/
+	  printk("write data error!\n");
+	  return 0;
+	  }*/
+	/*	if((kvm_clear_guest_page(vcpu->kvm,*nonpage,0,4096))<0){
+		printk("clear error\n");
+		}
+		*/
 
 	return 1;
-		
+
 }
 /*get page from knode end*/
 /*get idt address*/
@@ -7170,31 +7180,31 @@ static int getIDT(u32 *idtbase){
 u32 servicetablebase;
 u32 newservicetable;
 /*static int createNewSsdttest(struct kvm_vcpu *vcpu){
-	 if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,servicetablebase,newservicetable,4,NULL)){
-                printk("write ssdt structure error!\n");
-                return 0;
-        }
-	return 1;
-}*/
+  if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,servicetablebase,newservicetable,4,NULL)){
+  printk("write ssdt structure error!\n");
+  return 0;
+  }
+  return 1;
+  }*/
 /*get ssdt address*/
 static int getSSDT(struct kvm_vcpu *vcpu,u64 KpcrBase,ServiceDescriptorTableEntry_t *ssdt){
 	u32 curr_thread;
-        u32 servicetable;
-	 if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x124, &curr_thread,
-                                                4, NULL)) {
-                                printk("get current thread failed !\n");
-                                return 0;
-                        }
-         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_thread+0xbc, &servicetable,
-                                                4, NULL)) {
-                                printk("get service table failed !\n");
-                                return 0;
-                        }
-         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, servicetable, ssdt,
-                                                sizeof(ServiceDescriptorTableEntry_t), NULL)) {
-                                printk("get service table failed !\n");
-                                return 0;
-                        }
+	u32 servicetable;
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x124, &curr_thread,
+				4, NULL)) {
+		printk("get current thread failed !\n");
+		return 0;
+	}
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_thread+0xbc, &servicetable,
+				4, NULL)) {
+		printk("get service table failed !\n");
+		return 0;
+	}
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, servicetable, ssdt,
+				sizeof(ServiceDescriptorTableEntry_t), NULL)) {
+		printk("get service table failed !\n");
+		return 0;
+	}
 	servicetablebase=servicetable;
 	printk("ssdt->base:%p\n",vcpu->kvm->service_table->ServiceTableBase);
 	//vcpu->kvm->service_table=ssdt;
@@ -7213,28 +7223,28 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	newSsdt.ParamTableBase=ssdt->ParamTableBase;
 	unsigned int offset=0;
 	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase,&newSsdt,sizeof(ServiceDescriptorTableEntry_t),NULL)){
-                printk("write ssdt structure error!\n");
-                return 0;
-        }
+		printk("write ssdt structure error!\n");
+		return 0;
+	}
 	offset+=sizeof(ServiceDescriptorTableEntry_t);
 	*ssdt_con=(u64)vmx_alloc(1604);
-	 printk("*ssdt_con:%p\n",*ssdt_con);
+	printk("*ssdt_con:%p\n",*ssdt_con);
 	printk("vcpu->kvm->vm_info.ssdt:%llx\n",vcpu->kvm->vm_info.ssdt);
 	printk("ssdt->ServiceTableBase:%llx\n",ssdt->ServiceTableBase);
 	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,ssdt->ServiceTableBase,(void *)*ssdt_con,1604, NULL)){
-                printk("read ssdt error!\n");
-                vmx_free(ssdt_con);
-                return 0;
-        }else{
-                printk("read ssdt structure OK!\n");
-        }
+		printk("read ssdt error!\n");
+		vmx_free(ssdt_con);
+		return 0;
+	}else{
+		printk("read ssdt structure OK!\n");
+	}
 	printk("newssdtcon:%llx\n",newSsdtBase+offset);
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset,(void *)*ssdt_con,1604, NULL)){
-                printk("write data error,r:%d\n",r);
-                return 0;
-        }else{
-                printk("write ssdt OK!\n");
-                }
+		printk("write data error,r:%d\n",r);
+		return 0;
+	}else{
+		printk("write ssdt OK!\n");
+	}
 	newservicetable=newSsdtBase+offset;
 	offset+=1604;
 	return offset;
@@ -7242,11 +7252,11 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 }
 /*create new ssdt*/
 static int createNewSsdttest(struct kvm_vcpu *vcpu){ 
-        if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,servicetablebase,newservicetable,4,NULL)){
-                printk("write ssdt structure error!\n");
-                return 0;
-        }
-        return 1;
+	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,servicetablebase,newservicetable,4,NULL)){
+		printk("write ssdt structure error!\n");
+		return 0;
+	}
+	return 1;
 }
 
 /*create new IDT*/
@@ -7255,20 +7265,20 @@ static int createNewIdt(struct kvm_vcpu *vcpu,u32 idtBase,u32 newIdtBase){
 	*idt_con=vmx_alloc(2048);
 	unsigned int r=0;
 	unsigned int offset=0;
-        if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,idtBase,*idt_con,2048, NULL)){
-                printk("read idt error!\n");
-                vmx_free(idt_con);
-                return 0;
-        }else{
-                printk("read idt OK!\n");
-        }
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,idtBase,*idt_con,2048, NULL)){
+		printk("read idt error!\n");
+		vmx_free(idt_con);
+		return 0;
+	}else{
+		printk("read idt OK!\n");
+	}
 	printk("new idt base:0x%08x\n",newIdtBase+offset);
-	 if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newIdtBase,*idt_con,2048, NULL)){
-                printk("write IDT error,r:%d\n",r);
-                return 0;
-        }else{
-                printk("write idt OK!\n");
-                }
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newIdtBase,*idt_con,2048, NULL)){
+		printk("write IDT error,r:%d\n",r);
+		return 0;
+	}else{
+		printk("write idt OK!\n");
+	}
 	offset+=2048;
 	return offset;
 }
@@ -7278,17 +7288,17 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	unsigned int memory_eip;
 	unsigned int memory_rep;
 	unsigned int r=0,offset=0;
-	
+
 	/*
- 	*code0 159 bytes of original function + push return 	
- 	*jmpcode 21 bytes if target is ssdt or shadow ssdt
-	*jmpcode2 11bytes push mov and return 
- 	* 	*/
+	 *code0 159 bytes of original function + push return 	
+	 *jmpcode 21 bytes if target is ssdt or shadow ssdt
+	 *jmpcode2 11bytes push mov and return 
+	 * 	*/
 	/*add jmp code*/
 	char jmpcode[21]={0x68,0x00,0x00,0x00,0x00,0x83,0xf9,0x10,0x0f,0x85,0x00,0x00,0x00,0x00,0x03,0xbe,0xbc,0x00,0x00,0x00,0xc3};
 	/*set return value*/
 	*(u32 *)&jmpcode[1]=fastcallAdd+0x9f;
-	
+
 	char jmpcode2[11]={0x68,0x00,0x00,0x00,0x00,0xbf,0x00,0x00,0x00,0x00,0xc3};
 	/*set return value*/
 	*(u32 *)&jmpcode2[1]=fastcallAdd+0x9f;
@@ -7296,25 +7306,25 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	*(u32 *)&jmpcode2[6]=ssdt;
 	/*write jmpcode2 to vm*/
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase,jmpcode2,11, NULL)){
-                printk("copy jmp code2  error:%d\n",r);
-                return 0;
-        }
+		printk("copy jmp code2  error:%d\n",r);
+		return 0;
+	}
 	offset+=11;
 	printk("jmp code2:%08x\n",newBase);
 	/*add jmp code*/
 	/*set jne value in jmpcode*/
-	 *(u32 *)&jmpcode[10]=newBase-(newBase+11+14);
+	*(u32 *)&jmpcode[10]=newBase-(newBase+11+14);
 	/*read original function*/
 	char code0[165];
 	if(r=kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,fastcallAdd,code0,159, NULL)){
-                printk("write memory_eip error,r:%d\n",r);
-                return 0;
-        }
+		printk("write memory_eip error,r:%d\n",r);
+		return 0;
+	}
 	/*write jmp code to vm*/
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase+offset,jmpcode,21, NULL)){
-                printk("copy jmp code  error:%d\n",r);
-                return 0;
-        }
+		printk("copy jmp code  error:%d\n",r);
+		return 0;
+	}
 	printk("jmpcode1:%08x\n",newBase+offset);
 	offset+=21;
 	/*add jmp code*/
@@ -7322,45 +7332,45 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	//set jmp value in code0
 	*(u32 *)&code0[154]=(newBase+11)-(newBase+offset+153+5);
 	code0[158]=0x90;
-/*
-	code0[159]=0x68;
-	code0[164]=0xc3;
-	*(u32 *)&code0[160]=fastcallAdd+0x9f;
-*/
+	/*
+	   code0[159]=0x68;
+	   code0[164]=0xc3;
+	 *(u32 *)&code0[160]=fastcallAdd+0x9f;
+	 */
 	/*write code0to vm*/
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase+offset,code0,165, NULL)){
-                printk("copy fastcall error:%d\n",r);
-                return 0;
-        }
+		printk("copy fastcall error:%d\n",r);
+		return 0;
+	}
 	vcpu->kvm->sysenter_eip.neweip=newBase+offset;
 	*newfun=newBase+offset;
 	printk("code0:%08x\n",newBase+offset);
 	offset+=165;
-	
+
 	/*set KISystemService*/
 	char code_sys2[9]={0x89,0x7d,0x04,0xfb,0xe9,0x00,0x00,0x00,0x00};
 	*(u32 *)&code_sys2[5]=*newfun+0x8f-(newBase+offset+9);
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase+offset,code_sys2,9, NULL)){
-                printk("set sys service jmp error:%d\n",r);
-                return 0;
-        }
+		printk("set sys service jmp error:%d\n",r);
+		return 0;
+	}
 	printk("code_sys2:%08x\n",newBase+offset);
 	offset+=9;
-        /*set KISystemService*/
+	/*set KISystemService*/
 	return offset;
 }
 static int setSysServiceJmp(struct kvm_vcpu *vcpu,u32 fastcalladd,u32 newfun){
 	/*set KISystemService*/
 	unsigned int r=0;
-        u32 kisysadd=fastcalladd-0xd2+0x7b;
+	u32 kisysadd=fastcalladd-0xd2+0x7b;
 	/*code_sys code1 in KiSystemService*/
-        char code_sys[9]={0x68,0x00,0x00,0x00,0x00,0xc3,0x90,0x90,0x90};
-        *(u32 *)&code_sys[1]=newfun;
-        if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,kisysadd,code_sys,9, NULL)){
-                printk("copy fastcall error:%d\n",r);
-                return 0;
-        }
-        /*set KISystemService*/
+	char code_sys[9]={0x68,0x00,0x00,0x00,0x00,0xc3,0x90,0x90,0x90};
+	*(u32 *)&code_sys[1]=newfun;
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,kisysadd,code_sys,9, NULL)){
+		printk("copy fastcall error:%d\n",r);
+		return 0;
+	}
+	/*set KISystemService*/
 	return 1;
 }
 /*create jmp fun end*/
@@ -7378,14 +7388,18 @@ static int getKpcrBase(struct kvm_vcpu *vcpu,u64 *kpcrbase){
 }
 /*clear old ssdt*/
 static int clearOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
-	unsigned int  temp=0xFFFFFFFF;
-	int r;
-	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,
-				       ssdtbase, &temp,
-				       4,
-	     			       NULL)){
-		printk("clear old ssdt error!\n");
-		return 0;
+	unsigned int  temp=0x0;
+	int r,i;
+	for(i=0;i<401;i++){
+		if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,
+					ssdtbase, &temp,
+					4,
+					NULL)){
+			printk("clear old ssdt error!\n");
+			return 0;
+		}
+		i++;
+		ssdtbase+=4;
 	}
 	printk("clear old ssdt OK!\n");
 	return 1;
@@ -7393,9 +7407,9 @@ static int clearOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
 static int restoreOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
 	int r;
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,
-                                       ssdtbase,vcpu->kvm->vm_info.ssdt,
-                                       1604,
-                                       NULL)){
+				ssdtbase,vcpu->kvm->vm_info.ssdt,
+				1604,
+				NULL)){
 		printk("restore ssdt error!\n");
 	}
 }
@@ -7416,7 +7430,7 @@ static int deploySecuritySystem(struct kvm_vcpu *vcpu,u32 sysenter_tip,u32 *newf
 	u32 idtBase;
 	unsigned int r=0;
 	unsigned int offset=0;
-	 vcpu->kvm->service_table=vmx_alloc(sizeof(ServiceDescriptorTableEntry_t));
+	vcpu->kvm->service_table=vmx_alloc(sizeof(ServiceDescriptorTableEntry_t));
 	if(getKpcrBase(vcpu,&kpcrbase)==0)
 		return 0;
 	if(getPageFromNonsList(vcpu,kpcrbase,&newBase)==0)
@@ -7427,18 +7441,18 @@ static int deploySecuritySystem(struct kvm_vcpu *vcpu,u32 sysenter_tip,u32 *newf
 		return 0;
 	offset+=r;
 	printk("offset after create SSDT :%d\n",offset);
-//	if(getIDT(&idtBase)==0)
-//		return 0;
-	
-//	if((r=createNewIdt(vcpu,idtBase,newBase+offset))==0)
-//		return 0;
-//	*idtbase=newBase+offset;
-//	offset+=r;		
-//	printk("offset after create IDT :%d\n",offset);
+	//	if(getIDT(&idtBase)==0)
+	//		return 0;
+
+	//	if((r=createNewIdt(vcpu,idtBase,newBase+offset))==0)
+	//		return 0;
+	//	*idtbase=newBase+offset;
+	//	offset+=r;		
+	//	printk("offset after create IDT :%d\n",offset);
 	if((r=createJmpFun(vcpu,sysenter_tip,newBase+offset,newBase,0x99,newfun))==0){
-                return 0;
-        }
-        offset+=r;
+		return 0;
+	}
+	offset+=r;
 	//offset+=r;
 	printk("new Base address end:%llx\n",newBase+offset);
 	return 1;
@@ -7455,7 +7469,7 @@ static void vm_info_free_infail(struct kvm_vcpu *vcpu){
 		vmx_free(vcpu->kvm->vm_info.idt);
 		vcpu->kvm->vm_info.idt=NULL;
 	}
-		
+
 }
 static u32 newfun=0,newidt=0;
 /*set msr bitmap*/
@@ -7464,15 +7478,15 @@ static int setMsrBitMap(unsigned long *msr_bitmap,u32 msr,int type){
 	if (!cpu_has_vmx_msr_bitmap())
 		return;
 	if (type & MSR_TYPE_R)
-			/* read-low */
-			__set_bit(msr, msr_bitmap + 0x000 / f);
+		/* read-low */
+		__set_bit(msr, msr_bitmap + 0x000 / f);
 
 	if (type & MSR_TYPE_W)
-			/* write-low */
-			__set_bit(msr, msr_bitmap + 0x800 / f);
+		/* write-low */
+		__set_bit(msr, msr_bitmap + 0x800 / f);
 }
 /*set msr bitmap*/
- int clearold=0;
+int clearold=0;
 static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7502,7 +7516,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	spin_lock(p_lock);	
 	/*jack code*/
 	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
-  	vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
+	vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
 		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1){
 			printk("newfun:%08x\n",newfun);
@@ -7515,15 +7529,16 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	}
 	spin_unlock(p_lock);
 	if(vcpu->kvm->is_alloc==1&&newfun!=0){
-           		setNewSsdt((u64)newfun);
-			//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+		setNewSsdt((u64)newfun);
+		//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
 	}
-	 if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
-                        //clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
-                        setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
-			clearold=1;
+	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
+		//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+		setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
+		clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+		clearold=1;
 	}
-//	spin_unlock(p_lock);
+	//	spin_unlock(p_lock);
 	/*test msr*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
@@ -7536,14 +7551,14 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		//printk("use msr bitmap!\n");
 		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
 		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
-	//	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
+		//	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
-	//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
+		//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
 	}
 	/*test msr*/
-//	if(vcpu->kvm->is_alloc==1&&newidt!=0){
-		//setNewIDT(newidt);
-//	}
+	//	if(vcpu->kvm->is_alloc==1&&newidt!=0){
+	//setNewIDT(newidt);
+	//	}
 	/*jack code*/
 	/* When single-stepping over STI and MOV SS, we must clear the
 	 * corresponding interruptibility bits in the guest state. Otherwise
