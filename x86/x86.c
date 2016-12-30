@@ -5882,6 +5882,8 @@ static int del_list(struct list_head *head,struct list_head *node){
 	if(head->next==head)
 		return 0;
 	struct list_head *temp,*p;
+	SeProcess *sp;
+	sp=(SeProcess *)node;
 	temp=head->next;
 	p=head;
 	while(temp!=head){
@@ -5893,17 +5895,58 @@ static int del_list(struct list_head *head,struct list_head *node){
 		p=p->next;
 		temp=temp->next;
 	}
+	kfree(sp);
+	return 1;
 }
 static int foreach_process_list(struct list_head *head){
+	if(head->next==head){
+		printk("secure process list is empty!\n");
+                return 0;
+	}
 	struct list_head *p=head->next;
 	SeProcess *temp;
 	int i=0;
+	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
 		printk("[%d] process id %d\n",i,temp->u1.pro_id);
 		p=p->next;
 		i++;
 	}
+	return 1;
+}
+static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address){
+	struct list_head *head,*p;
+	SeProcess *temp;
+	head=&(vcpu->kvm->se_pro_list.pro_list);
+	p=head->next;
+	if(p==head)
+                return 0;
+	int i=0;
+	while(p!=head&&p!=NULL){
+		temp=(SeProcess *)p;
+		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address,&temp->u1.pro_id,4, NULL))
+		{
+				printk("fail to write process ID!\n");
+				return 0;
+		}
+		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address+4,temp->image_name,20, NULL))
+                {
+                                printk("fail to write process name!\n");
+                                return 0;
+                }
+		pro_list_address+=20;
+                p=p->next;
+                i++;
+        }
+	/*mark process end*/
+	int a=-1;
+	if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address,&a,4, NULL))
+                {
+                                printk("fail to mark end!\n");
+                                return 0;
+                }
+	return 1;
 }
 static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid){
 	struct list_head *p=head->next;
@@ -5918,15 +5961,38 @@ static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid)
 
 }
 /*operation by vm*/
-static void add_se_process(int sepid,struct kvm_vcpu *vcpu){
-	SeProcess sepro;
-	sepro.u1.pro_id=sepid;
-	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro.pro_list);
+/*handle vm virtual address*/
+static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
+	
+	SeProcess *sepro;
+	sepro=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa, &sepro->u1.pro_id,4, NULL))
+    	{
+        	return 0;
+    	}
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa+4, &sepro->image_name,20, NULL))
+        {
+                return 0;
+        }
+	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro->pro_list);
+	vcpu->kvm->se_pro_list.u1.pro_count++;
+	printk("add process :%d------total count:%d\n",sepro->u1.pro_id,vcpu->kvm->se_pro_list.u1.pro_count);
+	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
+	return 1;
 }
-static void remove_se_process(int sepid,struct kvm_vcpu *vcpu){
+static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	struct list_head *p;
+	int sepid;
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa,&sepid,4, NULL))
+        {
+                return 0;
+        }
 	p=find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,sepid);
 	del_list(&vcpu->kvm->se_pro_list.pro_list,p);	
+	vcpu->kvm->se_pro_list.u1.pro_count--;
+	 printk("del process :%d------total count:%d\n",sepid,vcpu->kvm->se_pro_list.u1.pro_count);
+	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
+	return 1;
 }
 
 static void enable_security_vm(struct kvm_vcpu *vcpu){
@@ -5938,7 +6004,22 @@ static void disable_security_vm(struct kvm_vcpu *vcpu){
 }
 
 
-
+static int jack_handle_op(struct kvm_vcpu *vcpu,int opcode,unsigned int pa){
+	printk("in jack handle op!\n");
+	unsigned int ret=0;
+	switch(opcode){
+		 case KVM_ADD_SE_PROCESS:
+                        ret=add_se_process(vcpu,pa);
+                        break;
+                case KVM_REMOVE_SE_PROCESS:
+                        ret=remove_se_process(vcpu,pa);
+                        break;
+		default:
+                        ret = -KVM_ENOSYS;
+                        break;
+	}
+	return ret;
+}
 /*jack code*/
 
 
@@ -5973,16 +6054,17 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		goto out;
 	}
 	/*add Return values for hypercalls  in kvm_para.h*/
-	/*ecx is pid*/
+	/*ecx --a1 is sub opcode*/
+	/*ebx--a0 is process structure*/
 	switch (nr) {
 		case KVM_HC_VAPIC_POLL_IRQ:
 			ret = 0;
 			break;
-		case KVM_ADD_SE_PROCESS:
-			add_se_process(a1,vcpu);
+		case JACK_OP_CODE:
+			ret=jack_handle_op(vcpu,a1,a0);
 			break;
-		case KVM_REMOVE_SE_PROCESS:
-			remove_se_process(a1,vcpu);
+		case PROCDESS_QUERY_CODE:
+			ret=query_se_process(vcpu,a0);
 			break;
 		case KVM_ENABLE_SECURITY:
 			enable_security_vm(vcpu);

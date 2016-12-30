@@ -7515,27 +7515,26 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//static u32 newfun,newidt;
 	spin_lock(p_lock);	
 	/*jack code*/
-	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
+/*	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
 		vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
 		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1){
 			printk("newfun:%08x\n",newfun);
 			vcpu->kvm->is_alloc=1;
 			printk("service table base:%08x\n",vcpu->kvm->service_table->ServiceTableBase);
-			//clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
 		}
 		else
 			vm_info_free_infail(vcpu);	
-	}
+	}*/
 	//spin_unlock(p_lock);
-	if(vcpu->kvm->is_alloc==1&&newfun!=0){
+/*	if(vcpu->kvm->is_alloc==1&&newfun!=0){
 		setNewSsdt((u64)newfun);
 	}
 	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
 		setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
 		clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
 		clearold=1;
-	}
+	}*/
 	spin_unlock(p_lock);
 	/*test msr*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
@@ -7547,10 +7546,10 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	}
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
 		//printk("use msr bitmap!\n");
-		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
+	/*	vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
 		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
-		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
+	*/	//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
 		//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
 	}
 	/*test msr*/
