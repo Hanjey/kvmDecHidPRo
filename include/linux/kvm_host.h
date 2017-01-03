@@ -405,7 +405,7 @@ typedef struct _Vm_Info{
 }VmInfo;
 typedef struct _Se_Process{
 	struct list_head pro_list;
-	char image_name[20];
+	char image_name[30];
 	union{
 		int pro_id;
 		int pro_count;
@@ -414,7 +414,7 @@ typedef struct _Se_Process{
 typedef struct process_info
 {
 	int processID;
-	char image_name[20];
+	char image_name[30];
 }ProcessInfo;
 
 /*jack code*/

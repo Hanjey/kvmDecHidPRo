@@ -5905,37 +5905,39 @@ static int foreach_process_list(struct list_head *head){
 	}
 	struct list_head *p=head->next;
 	SeProcess *temp;
-	int i=0;
+	int i=1;
 	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
-		printk("[%d] process id %d\n",i,temp->u1.pro_id);
+		printk("[%d] process id %d  process name %s\n",i,temp->u1.pro_id,temp->image_name);
 		p=p->next;
 		i++;
 	}
 	return 1;
 }
 static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address){
+//	printk("in query_se_process,pro_list_address:%08x\n,pro_list_address");
 	struct list_head *head,*p;
 	SeProcess *temp;
-	head=&(vcpu->kvm->se_pro_list.pro_list);
+	head=&vcpu->kvm->se_pro_list.pro_list;
 	p=head->next;
-	if(p==head)
+/*	if(p==head)
                 return 0;
+	*/
 	int i=0;
-	while(p!=head&&p!=NULL){
+	while(p!=head){
 		temp=(SeProcess *)p;
 		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address,&temp->u1.pro_id,4, NULL))
 		{
 				printk("fail to write process ID!\n");
 				return 0;
 		}
-		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address+4,temp->image_name,20, NULL))
+		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address+4,temp->image_name,30, NULL))
                 {
                                 printk("fail to write process name!\n");
                                 return 0;
                 }
-		pro_list_address+=20;
+		pro_list_address+=34;
                 p=p->next;
                 i++;
         }
@@ -6029,16 +6031,15 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
 	int r = 1;
-
-	if (kvm_hv_hypercall_enabled(vcpu->kvm))
+	nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
+	if (kvm_hv_hypercall_enabled(vcpu->kvm)&&nr!=20&&nr!=24)
 		return kvm_hv_hypercall(vcpu);
 
-	nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
 	a0 = kvm_register_read(vcpu, VCPU_REGS_RBX);
 	a1 = kvm_register_read(vcpu, VCPU_REGS_RCX);
 	a2 = kvm_register_read(vcpu, VCPU_REGS_RDX);
 	a3 = kvm_register_read(vcpu, VCPU_REGS_RSI);
-
+	printk("eax:%d\n",nr);
 	trace_kvm_hypercall(nr, a0, a1, a2, a3);
 
 	if (!is_long_mode(vcpu)) {
@@ -6048,11 +6049,12 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		a2 &= 0xFFFFFFFF;
 		a3 &= 0xFFFFFFFF;
 	}
-
+	//vm-exit from VM kernel is recommanded!
+	/*
 	if (kvm_x86_ops->get_cpl(vcpu) != 0) {
 		ret = -KVM_EPERM;
 		goto out;
-	}
+	}*/
 	/*add Return values for hypercalls  in kvm_para.h*/
 	/*ecx --a1 is sub opcode*/
 	/*ebx--a0 is process structure*/
