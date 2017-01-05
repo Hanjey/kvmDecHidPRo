@@ -896,6 +896,13 @@ static inline bool is_page_fault(u32 intr_info)
 		(INTR_TYPE_HARD_EXCEPTION | PF_VECTOR | INTR_INFO_VALID_MASK);
 }
 
+static inline bool is_gp_fault(u32 intr_info){
+	return (intr_info & (INTR_INFO_INTR_TYPE_MASK | INTR_INFO_VECTOR_MASK |
+			     INTR_INFO_VALID_MASK)) ==
+		(INTR_TYPE_HARD_EXCEPTION | GP_VECTOR | INTR_INFO_VALID_MASK);
+
+}
+
 static inline bool is_no_device(u32 intr_info)
 {
 	return (intr_info & (INTR_INFO_INTR_TYPE_MASK | INTR_INFO_VECTOR_MASK |
@@ -4807,7 +4814,9 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 
 	vect_info = vmx->idt_vectoring_info;
 	intr_info = vmx->exit_intr_info;
-
+	
+	/**/
+	/**/
 	if (is_machine_check(intr_info))
 		return handle_machine_check(vcpu);
 
@@ -4837,6 +4846,8 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 	 */
 	if ((vect_info & VECTORING_INFO_VALID_MASK) &&
 			!(is_page_fault(intr_info) && !(error_code & PFERR_RSVD_MASK))) {
+//		unsigned long gva_eip=vcpu->arch.regs[VCPU_REGS_RIP];
+  //            printk("vm exit rip:%08x\n",gva_eip);
 		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
 		vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_SIMUL_EX;
 		vcpu->run->internal.ndata = 2;
@@ -4844,13 +4855,48 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		vcpu->run->internal.data[1] = intr_info;
 		return 0;
 	}
-
+	if(is_gp_fault(intr_info)){
+		unsigned long gva_eip=vcpu->arch.regs[VCPU_REGS_RIP];
+              printk("vm exit rip----------:%08x\n",gva_eip);
+	}
 	if (is_page_fault(intr_info)) {
 		/* EPT won't cause page fault directly */
-		BUG_ON(enable_ept);
+		//BUG_ON(enable_ept);
+		printk("this is a vmexit by security module0!\n");
+		unsigned long gva_eip=vmcs_readl(GUEST_RIP);
 		cr2 = vmcs_readl(EXIT_QUALIFICATION);
 		trace_kvm_page_fault(cr2, error_code);
-
+		if(gva_eip==0xffffffff){
+			printk("this is a vmexit by security module!\n");
+                	unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
+                	u32 nr_add;
+               		printk("sys call number:%d\n",nr);
+                	nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                	printk("nr_add:%llx\n",nr_add);
+			printk("error code:%08x\n",error_code);
+                	kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+                	return 1;		
+		}	
+		struct x86_exception e;
+		e.vector=PF_VECTOR;
+		e.error_code_valid=true;
+		e.error_code=error_code;
+		e.nested_page_fault=false;
+		e.address=cr2;
+		kvm_inject_page_fault(vcpu, &e);
+		return 1;
+/*	
+		if(gva_eip==0xffffffff){
+                printk("this is a vmexit by security module!\n");
+                unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
+                unsigned long nr_add;
+                printk("sys call number:%d\n",nr);
+                nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                printk("nr_add:%llx\n",nr_add);
+                kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);    
+                return 1;
+        }*/
+			
 		if (kvm_event_needs_reinjection(vcpu))
 			kvm_mmu_unprotect_page_virt(vcpu, cr2);
 		return kvm_mmu_page_fault(vcpu, cr2, error_code, NULL, 0);
@@ -5148,7 +5194,7 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 {
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data;
-	
+
 	//	printk("read msr %08x\n",ecx);
 	if (vmx_get_msr(vcpu, ecx, &data)) {
 		trace_kvm_msr_read_ex(ecx);
@@ -5159,9 +5205,9 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 	trace_kvm_msr_read(ecx, data);
 	/*vcpu->kvm->is_svm==1&&vcpu->kvm->is_alloc==1*/
 	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
-                data=(u64)vcpu->kvm->sysenter_eip.oldeip;
+		data=(u64)vcpu->kvm->sysenter_eip.oldeip;
 		printk("read 176h,cheat it:%llx\n",data);
-        }
+	}
 	/* FIXME: handling of bits 32:63 of rax, rdx */
 	vcpu->arch.regs[VCPU_REGS_RAX] = data & -1u;
 	vcpu->arch.regs[VCPU_REGS_RDX] = (data >> 32) & -1u;
@@ -5177,9 +5223,9 @@ static int handle_wrmsr(struct kvm_vcpu *vcpu)
 		| ((u64)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u) << 32);
 	/*jack code*/
 	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
-                data=(u64)vcpu->kvm->sysenter_eip.neweip;
-                 printk("write 176h,cheat it:%llx\n",data);
-        }
+		data=(u64)vcpu->kvm->sysenter_eip.neweip;
+		printk("write 176h,cheat it:%llx\n",data);
+	}
 	/*jack code*/
 	msr.data = data;
 	msr.index = ecx;
@@ -5391,7 +5437,16 @@ static int handle_task_switch(struct kvm_vcpu *vcpu)
 
 	return 1;
 }
-
+/*jack code*/
+static int handle_syscall_exit(struct kvm_vcpu *vcpu){
+	unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
+	unsigned long nr_add;
+	printk("sys call number:%d\n",nr);
+	nr_add = vcpu->kvm->vm_info.ssdt+nr*4;
+	printk("nr_add:%llx\n",nr_add);
+	return 1;
+}
+/*jack code */
 static int handle_ept_violation(struct kvm_vcpu *vcpu)
 {
 	unsigned long exit_qualification;
@@ -5412,6 +5467,17 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 		vcpu->run->exit_reason = KVM_EXIT_UNKNOWN;
 		vcpu->run->hw.hardware_exit_reason = EXIT_REASON_EPT_VIOLATION;
 		return 0;
+	}
+	gva_t gva_eip=vcpu->arch.regs[VCPU_REGS_RIP];
+	if(gva_eip==0xffffffff){
+		printk("this is a vmexit by security module!\n");
+		unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
+		unsigned long nr_add;
+		printk("sys call number:%d\n",nr);
+		nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr*4);
+		printk("nr_add:%llx\n",nr_add);
+		kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+		return 1;
 	}
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
@@ -7245,6 +7311,15 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	}else{
 		printk("write ssdt OK!\n");
 	}
+	/*set ssdt vmexit*/	
+	unsigned int data=0xffffffff;
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+190*4,&data,4, NULL)){
+		printk("clear openprocess error,r:%d\n",r);
+		return 0;
+	}else{
+		printk("clear openprocess OK!\n");
+	}
+	/*set ssdt vmexit*/
 	newservicetable=newSsdtBase+offset;
 	offset+=1604;
 	return offset;
@@ -7515,26 +7590,32 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//static u32 newfun,newidt;
 	spin_lock(p_lock);	
 	/*jack code*/
-/*	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
+	u64 guest_sysenter_eip = vmcs_readl(GUEST_SYSENTER_EIP);
 	if(vcpu->kvm->is_alloc==0&&guest_sysenter_eip!=0x0&&vcpu->vcpu_id==0){
 		vcpu->kvm->sysenter_eip.oldeip=guest_sysenter_eip;
 		if(deploySecuritySystem(vcpu,guest_sysenter_eip,&newfun,&newidt)==1){
 			printk("newfun:%08x\n",newfun);
 			vcpu->kvm->is_alloc=1;
 			printk("service table base:%08x\n",vcpu->kvm->service_table->ServiceTableBase);
+			int nr=190;
+                	u32 nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                	printk("nr_add:%08x\n",nr_add);
 		}
 		else
 			vm_info_free_infail(vcpu);	
-	}*/
+	}
 	//spin_unlock(p_lock);
-/*	if(vcpu->kvm->is_alloc==1&&newfun!=0){
+	if(vcpu->kvm->is_alloc==1&&newfun!=0){
 		setNewSsdt((u64)newfun);
+		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<PF_VECTOR));
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK,0x10);
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH,0x10);
 	}
 	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
-		setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
-		clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
-		clearold=1;
-	}*/
+		/*	setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
+			clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+			clearold=1;*/
+	}
 	spin_unlock(p_lock);
 	/*test msr*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
@@ -7546,10 +7627,10 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	}
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
 		//printk("use msr bitmap!\n");
-	/*	vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
+		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
 		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
-	*/	//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
+		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
 		//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
 	}
 	/*test msr*/
