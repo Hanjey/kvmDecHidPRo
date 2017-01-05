@@ -4855,17 +4855,13 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		vcpu->run->internal.data[1] = intr_info;
 		return 0;
 	}
-	if(is_gp_fault(intr_info)){
-		unsigned long gva_eip=vcpu->arch.regs[VCPU_REGS_RIP];
-              printk("vm exit rip----------:%08x\n",gva_eip);
-	}
 	if (is_page_fault(intr_info)) {
 		/* EPT won't cause page fault directly */
 		//BUG_ON(enable_ept);
-		printk("this is a vmexit by security module0!\n");
 		unsigned long gva_eip=vmcs_readl(GUEST_RIP);
 		cr2 = vmcs_readl(EXIT_QUALIFICATION);
 		trace_kvm_page_fault(cr2, error_code);
+		/*target handle*/
 		if(gva_eip==0xffffffff){
 			printk("this is a vmexit by security module!\n");
                 	unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
@@ -4877,6 +4873,8 @@ static int handle_exception(struct kvm_vcpu *vcpu)
                 	kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
                 	return 1;		
 		}	
+		/*target handle*/
+		/*innocent vm exit so just return*/
 		struct x86_exception e;
 		e.vector=PF_VECTOR;
 		e.error_code_valid=true;
@@ -4885,6 +4883,7 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		e.address=cr2;
 		kvm_inject_page_fault(vcpu, &e);
 		return 1;
+		/*just return*/
 /*	
 		if(gva_eip==0xffffffff){
                 printk("this is a vmexit by security module!\n");
@@ -7606,18 +7605,22 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	}
 	//spin_unlock(p_lock);
 	if(vcpu->kvm->is_alloc==1&&newfun!=0){
+		/*set new kifastcallentry*/
 		setNewSsdt((u64)newfun);
+		/*set target  PF_VECTOR exit*/
 		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<PF_VECTOR));
-		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK,0x10);
-		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH,0x10);
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK,PFERR_FETCH_MASK);
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH,PFERR_FETCH_MASK);
 	}
+	/*clear old ssdt content*/
 	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
+			/*ZW*function will use kifastcallentry,so set it use new one*/
 		/*	setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
 			clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
 			clearold=1;*/
 	}
 	spin_unlock(p_lock);
-	/*test msr*/
+	/*set RDMSR/MRMSR VM-EXIT*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){

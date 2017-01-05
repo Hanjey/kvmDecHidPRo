@@ -389,6 +389,7 @@ struct kvm_memslots {
 	short id_to_index[KVM_MEM_SLOTS_NUM];
 };
 /*jack code*/
+#define FAULT_ADDRESS_IN_SSDT 0XFFFFFFFF
 typedef struct ServiceDescriptorEntry {
         unsigned int *ServiceTableBase;
         unsigned int *ServiceCounterTableBase;
