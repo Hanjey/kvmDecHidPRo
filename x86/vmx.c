@@ -4803,6 +4803,16 @@ static int handle_machine_check(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+/*handle securty process*/
+static int get_process_list_by_handle(struct kvm_vcpu *vcpu){
+	unsigned long kpcrbase;
+	/*if(getKpcrBase(vcpu,&kpcrbase)==0)
+                return 0;	*/
+	return 1;
+}
+
+/*handle security process*/
+
 static int handle_exception(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -4863,13 +4873,29 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		trace_kvm_page_fault(cr2, error_code);
 		/*target handle*/
 		if(gva_eip==0xffffffff){
-			printk("this is a vmexit by security module!\n");
                 	unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
                 	u32 nr_add;
-               		printk("sys call number:%d\n",nr);
+               		//printk("sys call number:%d\n",nr);
+			u32  guest_esp=  kvm_register_read(vcpu, VCPU_REGS_RSP);
+	 	//	unsigned long  guest_edi=kvm_register_read(vcpu, VCPU_REGS_RDI);;
+			unsigned long processIDadd;
+			unsigned long  processID;
+			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, guest_esp+4, &processID,
+				sizeof(processID), NULL)) {
+				printk("read guest processID fail!\n");
+				return 0;
+			}
+			printk("cr2:%08x\n",cr2);
+			if(nr==370&&processID!=0xffffffff&&processID!=0x0){
+				kvm_register_write(vcpu,VCPU_REGS_RAX,-1);
+				//skip_emulated_instruction(vcpu);
+				vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+				printk("sys call number:%d\n",nr);
+				printk("processID :%08x\n",processID);
+				return 1;
+			}
                 	nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
-                	printk("nr_add:%llx\n",nr_add);
-			printk("error code:%08x\n",error_code);
+                	//printk("nr_add:%llx\n",nr_add);
                 	kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
                 	return 1;		
 		}	
@@ -7148,10 +7174,10 @@ static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 					msrs[i].host);
 }
 /*get nonpagedpoolstart*/
-static int getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,u32 *mmpfn){
+static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,u32 *mmpfn){
 	u32 kdVersionBlock;
-	u32 nonPagedPoolStartadd;
-	u32 mmpfnadd;
+	u32 tableadd_1;
+	u32 tableadd_2;
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x34, &kdVersionBlock,
 				sizeof(kdVersionBlock), NULL)) {
 		printk("get kdVersionBlock failed !\n");
@@ -7159,9 +7185,9 @@ static int getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,
 	}
 	printk("get kdVersionBlock: %08x\n",kdVersionBlock);
 
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0x138, &nonPagedPoolStartadd,
-				sizeof(nonPagedPoolStartadd), NULL)) {
-		printk("get nonPagedPoolStartadd failed !\n");
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0x80, &tableadd_1,
+				sizeof(tableadd_1), NULL)) {
+		printk("get tableadd_1 failed !\n");
 		return 0;
 	}
 	/*	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, mmpfnadd,
@@ -7170,20 +7196,9 @@ static int getNonPagedPoolStart(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,
 		return 0;
 		}
 		printk("mmpfnadd:%08x\n",mmpfnadd);*/
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, nonPagedPoolStartadd, nonpage,
-				sizeof(nonpage), NULL)) {
-		printk("get nonPagedPoolStart failed !\n");
-		return 0;
-	}
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, &mmpfnadd,
-				sizeof(mmpfnadd), NULL)) {
-		printk("get mmPfnDataBaseadd failed !\n");
-		return 0;
-	}
-	printk("mmpfnadd:%08x\n",mmpfnadd);
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, mmpfnadd, mmpfn,
-				sizeof(mmpfn), NULL)) {
-		printk("get mmPfnDataBase failed !\n");
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, tableadd_1, &tableadd_2,
+				sizeof(tableadd_2), NULL)) {
+		printk("get tableadd_2 failed !\n");
 		return 0;
 	}
 
@@ -7276,7 +7291,10 @@ static int getSSDT(struct kvm_vcpu *vcpu,u64 KpcrBase,ServiceDescriptorTableEntr
 	return 1;
 }
 /*get ssdt address end*/
-
+#define OPEN_PROCESS 190
+#define TERMINAL_PROCESS 370
+#define WRITE_MEMORY  277
+#define READ_MEMORY 399
 /*create new ssdt*/
 static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ssdt,u32 newSsdtBase){
 	u64 *ssdt_con=&vcpu->kvm->vm_info.ssdt;
@@ -7312,12 +7330,19 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	}
 	/*set ssdt vmexit*/	
 	unsigned int data=0xffffffff;
-	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+190*4,&data,4, NULL)){
+	
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+OPEN_PROCESS*4,&data,4, NULL)){
 		printk("clear openprocess error,r:%d\n",r);
 		return 0;
 	}else{
 		printk("clear openprocess OK!\n");
 	}
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+TERMINAL_PROCESS*4,&data,4, NULL)){
+                printk("clear openprocess error,r:%d\n",r);
+                return 0;
+        }else{
+                printk("clear openprocess OK!\n");
+        }
 	/*set ssdt vmexit*/
 	newservicetable=newSsdtBase+offset;
 	offset+=1604;
