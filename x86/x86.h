@@ -118,6 +118,7 @@ int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 /*jack code*/
+static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid);
 void *vmx_alloc(unsigned long size);
 void vmx_free(const void *addr);
 unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64 *last_spte);

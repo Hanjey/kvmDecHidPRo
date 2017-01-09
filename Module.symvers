@@ -4,6 +4,7 @@
 0xb1c0746c	kvm_requeue_exception	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
 0x767f4ab6	kvm_set_page_dirty	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
 0xf2007363	kvm_set_memory_region	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
+0xa242dc2f	find_se_process_by_pid	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
 0x835d3447	kvm_apic_update_irr	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
 0x669da1fd	kvm_set_pfn_dirty	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL
 0x014c6719	kvm_get_kvm	/root/sourcecode/kvm-kmod-3.10.1/x86/kvm	EXPORT_SYMBOL_GPL

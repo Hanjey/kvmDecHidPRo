@@ -5962,6 +5962,7 @@ static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid)
 	return NULL;
 
 }
+EXPORT_SYMBOL_GPL(find_se_process_by_pid);
 /*operation by vm*/
 /*handle vm virtual address*/
 static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
