@@ -4803,17 +4803,18 @@ static int handle_machine_check(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-/*handle securty process*/
-static int get_process_list_by_handle(struct kvm_vcpu *vcpu){
-	unsigned long kpcrbase;
-	/*if(getKpcrBase(vcpu,&kpcrbase)==0)
-	  return 0;	*/
-	return 1;
-}
-
+/*jack code*/
 /*handle security process*/
+/*declare function*/
+static int get_process_list_by_handle(struct kvm_vcpu *vcpu);
 static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0);
  static int getProcessByHandle(struct kvm_vcpu *vcpu,u32 processhandle,u32 handle_table,u32 *objectbody);
+/*is process in sec list
+ * vcpu(in):pointer to current kvm_vcpu 
+ * processhandle(in): target process handle
+ * isOK(out):staus identify weather a process is in sec list,1 in 0 out
+ *
+ * */
 static int handle_is_in_sec(struct kvm_vcpu *vcpu,u32 processhandle,u32 *isOK){
 	u32 handle_table;
 	u32 processID;
@@ -4832,6 +4833,10 @@ static int handle_is_in_sec(struct kvm_vcpu *vcpu,u32 processhandle,u32 *isOK){
                                 return 0;
         }
 	printk("target processID:%d\n",processID);
+	if(find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,processID)==NULL){
+		*isOK=0; //not security process
+	}else	
+		*isOK=1;//is security process
 	return 1;
 }
 static int handle_exception(struct kvm_vcpu *vcpu)
@@ -4891,7 +4896,7 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		unsigned long gva_eip=vmcs_readl(GUEST_RIP);
 		cr2 = vmcs_readl(EXIT_QUALIFICATION);
 		trace_kvm_page_fault(cr2, error_code);
-		/*target handle*/
+		/*vm exit by target vmcall*/
 		if(gva_eip==0xffffffff){
 			unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
 			u32 nr_add;
@@ -4915,19 +4920,19 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 				printk("read guest exitstatus fail!\n");
 				return 0;
 			}
-
+			/* should switch by nr*/
 			if(nr==370&&processID!=0xffffffff&&processID!=0x0){
 				/*incalid operation,deny it and return!*/
 				printk("----------------------------------------\n");
-				u32 handle_table;
-				u32 objectadd;
-				getHandleTable(vcpu,&handle_table);
-				int i = getProcessByHandle(vcpu,processID,handle_table,&objectadd);
-				printk("objectadd:%08x\n",objectadd);
-				kvm_register_write(vcpu,VCPU_REGS_RAX,-1);
-				vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
-				printk("processHandle :%08x\n",processID);
-				return 1;
+				u32 isOK=0;
+				handle_is_in_sec(vcpu,processID,&isOK);
+				if(isOK){
+				///	get_process_list_by_handle(vcpu);	
+					kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
+					vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+					printk("processHandle :%08x\n",processID);
+					return 1;
+				}
 			}
 			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
 			//printk("nr_add:%llx\n",nr_add);
@@ -5281,7 +5286,6 @@ static int handle_wrmsr(struct kvm_vcpu *vcpu)
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data = (vcpu->arch.regs[VCPU_REGS_RAX] & -1u)
 		| ((u64)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u) << 32);
-	/*jack code*/
 	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
 		data=(u64)vcpu->kvm->sysenter_eip.neweip;
 		printk("write 176h,cheat it:%llx\n",data);
@@ -7209,7 +7213,7 @@ static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 					msrs[i].host);
 }
 /*get nonpagedpoolstart*/
-static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,u32 *mmpfn){
+static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *cidtable){
 	u32 kdVersionBlock;
 	u32 tableadd_1;
 	u32 tableadd_2;
@@ -7225,20 +7229,15 @@ static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage,u32 *m
 		printk("get tableadd_1 failed !\n");
 		return 0;
 	}
-	/*	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kdVersionBlock+0xe8, mmpfnadd,
-		sizeof(mmpfnadd), NULL)) {
-		printk("get mmPfnDataBaseadd failed !\n");
-		return 0;
-		}
-		printk("mmpfnadd:%08x\n",mmpfnadd);*/
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, tableadd_1, &tableadd_2,
 				sizeof(tableadd_2), NULL)) {
 		printk("get tableadd_2 failed !\n");
 		return 0;
 	}
-
+	*cidtable=tableadd_2;
 	return 0;
 }
+
 /*get nonpagedpoolstart end*/
 
 /*get page from knode*/
@@ -7301,6 +7300,10 @@ u32 newservicetable;
   }
   return 1;
   }*/
+/*get handle table of current process
+ *vcpu(in):pointer to current kvm-vcpu structure
+ * hanlde_table0(out):address of target handletable
+ * */
 static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0){
 	struct kvm_segment seg_fs;
 	u64 kpcrbase;
@@ -7313,18 +7316,22 @@ static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0){
                 return 0;
         }
 	kpcrbase=seg_fs.base;
+	/*get current kthread*/
 	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kpcrbase+0x124, &curr_thread,
                                 4, NULL)) {
                 printk("get current thread failed !\n");
                 return 0;
         }
 	 printk("get current thread :%08x\n",curr_thread);
+
+	/*get current eprocess*/
 	 if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_thread+0x150, &curr_process,
                                 4, NULL)) {
                 printk("get current process failed !\n");
                 return 0;
         }
          printk("get curr process :%08x\n",curr_process);
+	/*get current handletable*/
 	 if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_process+0xf4, &handle_table,
                                 4, NULL)) {
                 printk("get handle table failed !\n");
@@ -7353,7 +7360,7 @@ static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0){
 	printk("tablecode:%08x\n",tableCode);
 	index=tableCode&0x3;
 	CapturedTable=tableCode-index;
-	int i=0;
+	int i=0,j=0,k=0,a=0;
 	switch(index){
 		case 0:
 			TableLevel1=CapturedTable;
@@ -7371,14 +7378,14 @@ static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0){
                                        return 0;
                         }*/
 			*objectbody=(table_entry&(~0x7))+0x18;
-			i=1;
+			a=1;
 			break;
 		case 1:
 			TableLevel2=CapturedTable;
 			printk("TableLevel2:%08x\n",TableLevel2);
-			int i=processhandle%(2048);
+			i=processhandle%(2048);
 			processhandle-=i;
-			int j=processhandle/512;
+			j=processhandle/512;
 			printk("J:%d\n",j);
 			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,TableLevel2+j, &TableLevel1,
                                 4, NULL)) {
@@ -7398,14 +7405,41 @@ static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0){
                                         return 0;
                         }*/
                         *objectbody=(table_entry&(~0x7))+0x18;
-			i=1;
+			a=1;
 			break;	
+		case 2:
+			TableLevel3=CapturedTable;
+			i=processhandle%(2048);
+			 processhandle-=i;
+			k=processhandle/512;
+			j=k%4096;
+			k-=j;
+			k/=1024;
+			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,TableLevel3+k, &TableLevel2,
+                                4, NULL)) {
+                                       printk("get  TableLevel3 failed !\n");
+                                        return 0;
+                        }		
+			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,TableLevel2+j, &TableLevel1,
+                                4, NULL)) {
+                                       printk("get  TableLevel3 failed !\n");
+                                        return 0;
+                        }
+			table_entry_add=TableLevel1+(i*2);
+                        if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,table_entry_add, &table_entry,
+                                4, NULL)) {
+                                       printk("get TableLevel3 failed !\n");
+                                        return 0;
+                        }
+                        *objectbody=(table_entry&(~0x7))+0x18;
+                        a=1;
+                        break;
 		default:
 			*objectbody=0;
-			i=0;
+			a=0;
 			break;	
 	}
-	if(!i){
+	if(!a){
 		printk("get object error!\n");
 		return 0;
 	}
@@ -7439,6 +7473,7 @@ static int getSSDT(struct kvm_vcpu *vcpu,u64 KpcrBase,ServiceDescriptorTableEntr
 	return 1;
 }
 /*get ssdt address end*/
+#define CREATE_PROCESS 79
 #define OPEN_PROCESS 190
 #define TERMINAL_PROCESS 370
 #define WRITE_MEMORY  277
@@ -7660,7 +7695,94 @@ static int restoreOldSsdt(struct kvm_vcpu *vcpu,unsigned int ssdtbase){
 		printk("restore ssdt error!\n");
 	}
 }
+static int del_process_in_list(struct kvm_vcpu *vcpu,u32 processID){
+	struct list_head *p;
+        p=find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,processID);
+        del_list(&vcpu->kvm->normal_pro_list.pro_list,p);
+        vcpu->kvm->normal_pro_list.u1.pro_count--;	
+	return 1;
+}
+static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process){
+		SeProcess *tempNode;
+                tempNode=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
+                if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,next_process+0xb4, &tempNode->u1.pro_id,4, NULL))
+                {
+                        return 0;
+                }
+                 if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,next_process+0x16c, &tempNode->image_name,15, NULL))
+                {
+                        return 0;
+                }
+                if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,next_process+0x18, &tempNode->DirectoryBase,4, NULL))
+                {
+                        return 0;
+                }
+                insert_list(&vcpu->kvm->normal_pro_list.pro_list,&tempNode->pro_list);
+                vcpu->kvm->normal_pro_list.u1.pro_count++;
+		return 1;
+}
+static int get_process_list_by_handle(struct kvm_vcpu *vcpu){
+	u32 objectadd;
+	u32 startpid=4;
+	u32 curr_thread;
+	u32 curr_process;
+	u32 next_process;
+	u32 next_node;
+	u32 curr_node;
+        unsigned long kpcrbase;
+	unsigned long cidtable;
+        if(getKpcrBase(vcpu,&kpcrbase)==0)
+            return 0;     
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, kpcrbase+0x124, &curr_thread,
+                                4, NULL)) {
+                printk("get current thread failed !\n");
+                return 0;
+        }
+         printk("get current thread :%08x\n",curr_thread);
 
+        /*get current eprocess*/
+         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_thread+0x150, &curr_process,
+                                4, NULL)) {
+                printk("get current process failed !\n");
+                return 0;
+        }
+	curr_node=curr_process+0xb8;
+	if(add_process_to_list(vcpu,curr_process)==0)
+		goto end;
+         printk("get curr process :%08x\n",curr_process);
+        /*get current handletable*/
+         if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, curr_node, &next_node,
+                                4, NULL)) {
+                printk("get next node failed !\n");
+                return 0;
+        }
+	printk("curr_node :%08x\n",curr_node);
+	printk("next_node :%08x\n",next_node);	
+/*	if(getPspCidTable(vcpu,kpcrbase,&cidtable)==0)
+		return 0;
+	if(getProcessByHandle(vcpu,startpid,cidtable,&objectadd)==0){
+		printk("get system process error!\n");
+		return 0;
+	}
+	
+*/	u32 tempadd;
+	while(curr_node!=next_node){
+		next_process=next_node-0xb8;
+		if(add_process_to_list(vcpu,next_process)==0)
+        	        goto end;	
+		if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, next_node, &tempadd,
+                                4, NULL)) {
+         	       printk("get next process  failed !\n");
+                	return 0;
+        	}
+		next_node=tempadd;
+		printk("next_node :%08x\n",next_node);
+	}
+	 foreach_process_list(&vcpu->kvm->normal_pro_list.pro_list);
+	return 1;	
+end:
+        return 0;
+}
 
 /*get kpcr end*/
 static void setNewSsdt(u64 newfun){
@@ -7677,6 +7799,8 @@ static int deploySecuritySystem(struct kvm_vcpu *vcpu,u32 sysenter_tip,u32 *newf
 	u32 idtBase;
 	unsigned int r=0;
 	unsigned int offset=0;
+	if(get_process_list_by_handle(vcpu)==0)
+                return 0;
 	vcpu->kvm->service_table=vmx_alloc(sizeof(ServiceDescriptorTableEntry_t));
 	if(getKpcrBase(vcpu,&kpcrbase)==0)
 		return 0;

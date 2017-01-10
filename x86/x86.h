@@ -118,12 +118,16 @@ int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 /*jack code*/
+static int foreach_process_list(struct list_head *head);
+static int insert_list(struct list_head *head,struct list_head *node);
+static int del_list(struct list_head *head,struct list_head *node);
 static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid);
 void *vmx_alloc(unsigned long size);
 void vmx_free(const void *addr);
+/*
 unsigned int kvm_get_guest_last_spte(struct kvm_vcpu *vcpu,gva_t addr,u64 *last_spte);
 int kvm_alloc_vm_page1(gva_t ssdt_base,gva_t nonpagedpoolstart,struct kvm_vcpu *vcpu,u32 mmpfn);
- int kvm_alloc_vm_page(gva_t ssdt_base,struct kvm_vcpu *vcpu,u64 *last_spte,int *flag);
+ int kvm_alloc_vm_page(gva_t ssdt_base,struct kvm_vcpu *vcpu,u64 *last_spte,int *flag);*/
 int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);

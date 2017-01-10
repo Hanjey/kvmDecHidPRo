@@ -404,14 +404,17 @@ typedef struct _Vm_Info{
 	unsigned int *ssdt;	
 	unsigned int *idt;
 }VmInfo;
+/*process structure maintained by KVM*/
 typedef struct _Se_Process{
 	struct list_head pro_list;
 	char image_name[30];
+	u32 DirectoryBase;
 	union{
 		int pro_id;
 		int pro_count;
 	}u1;
 }SeProcess;
+/*receive VM process info from Hyper call*/
 typedef struct process_info
 {
 	int processID;
@@ -476,6 +479,7 @@ struct kvm {
 	int is_svm;
 	int is_alloc;/*jack code*/
 	 VmInfo vm_info;
+	SeProcess normal_pro_list;
 	SeProcess se_pro_list;
 	SysenterEip sysenter_eip;
 /*jack code*/

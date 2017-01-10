@@ -5878,6 +5878,7 @@ static int insert_list(struct list_head *head,struct list_head *node){
 	return 1;
 	
 }
+EXPORT_SYMBOL_GPL(insert_list);
 static int del_list(struct list_head *head,struct list_head *node){
 	if(head->next==head)
 		return 0;
@@ -5898,6 +5899,7 @@ static int del_list(struct list_head *head,struct list_head *node){
 	kfree(sp);
 	return 1;
 }
+EXPORT_SYMBOL_GPL(del_list);
 static int foreach_process_list(struct list_head *head){
 	if(head->next==head){
 		printk("secure process list is empty!\n");
@@ -5909,12 +5911,13 @@ static int foreach_process_list(struct list_head *head){
 	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
-		printk("[%d] process id %d  process name %s\n",i,temp->u1.pro_id,temp->image_name);
+		printk("[%2d] process id [%4d]  process name [%s]\n",i,temp->u1.pro_id,temp->image_name);
 		p=p->next;
 		i++;
 	}
 	return 1;
 }
+EXPORT_SYMBOL_GPL(foreach_process_list);
 static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address){
 //	printk("in query_se_process,pro_list_address:%08x\n,pro_list_address");
 	struct list_head *head,*p;
@@ -5966,8 +5969,11 @@ EXPORT_SYMBOL_GPL(find_se_process_by_pid);
 /*operation by vm*/
 /*handle vm virtual address*/
 static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
-	
+	if(vcpu->kvm->normal_pro_list.u1.pro_count==0){
+		
+	}
 	SeProcess *sepro;
+	SeProcess *tempp;
 	sepro=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
 	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa, &sepro->u1.pro_id,4, NULL))
     	{
@@ -5977,9 +5983,14 @@ static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
         {
                 return 0;
         }
+	temp=(SeProcess *)find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,sepro->u1.pro_id);
+	/*if target process is not in normal list*/
+	if(temp==NULL)
+		return 0;
+	sepro->DirectoryBase=temp->DirectoryBase;
 	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro->pro_list);
 	vcpu->kvm->se_pro_list.u1.pro_count++;
-	printk("add process :%d------total count:%d\n",sepro->u1.pro_id,vcpu->kvm->se_pro_list.u1.pro_count);
+	printk("add process :[%4d]------total count:[%2d]\n",sepro->u1.pro_id,vcpu->kvm->se_pro_list.u1.pro_count);
 	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
