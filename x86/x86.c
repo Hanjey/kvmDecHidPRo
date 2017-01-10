@@ -5911,7 +5911,7 @@ static int foreach_process_list(struct list_head *head){
 	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
-		printk("[%2d] process id [%4d]  process name [%s]\n",i,temp->u1.pro_id,temp->image_name);
+		printk("[%2d] process id: [%4d]  process name: [%s]  DirectoryBase:[0x%08x]\n",i,temp->u1.pro_id,temp->image_name,temp->DirectoryBase);
 		p=p->next;
 		i++;
 	}
@@ -5970,10 +5970,11 @@ EXPORT_SYMBOL_GPL(find_se_process_by_pid);
 /*handle vm virtual address*/
 static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	if(vcpu->kvm->normal_pro_list.u1.pro_count==0){
-		
+		if(get_process_list_by_handle(vcpu)==0)
+			return 0;	
 	}
 	SeProcess *sepro;
-	SeProcess *tempp;
+	SeProcess *temp;
 	sepro=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
 	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa, &sepro->u1.pro_id,4, NULL))
     	{
@@ -5983,7 +5984,7 @@ static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
         {
                 return 0;
         }
-	temp=(SeProcess *)find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,sepro->u1.pro_id);
+	temp=(SeProcess *)find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,sepro->u1.pro_id);
 	/*if target process is not in normal list*/
 	if(temp==NULL)
 		return 0;
@@ -6008,6 +6009,106 @@ static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
+/*operation to normal process list*/
+static int del_process_in_list(struct kvm_vcpu *vcpu,u32 processID){
+        struct list_head *p;
+        p=find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,processID);
+        del_list(&vcpu->kvm->normal_pro_list.pro_list,p);
+        vcpu->kvm->normal_pro_list.u1.pro_count--;
+        return 1;
+}
+
+static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process){
+                SeProcess *tempNode;
+                tempNode=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
+                if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0xb4, &tempNode->u1.pro_id,4, NULL))
+                {
+                        return 0;
+                }
+                 if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0x16c, &tempNode->image_name,15, NULL))
+                {
+                        return 0;
+                }
+                if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0x18, &tempNode->DirectoryBase,4, NULL))
+                {
+                        return 0;
+                }
+                insert_list(&vcpu->kvm->normal_pro_list.pro_list,&tempNode->pro_list);
+                vcpu->kvm->normal_pro_list.u1.pro_count++;
+                return 1;
+}
+
+
+static int get_process_list_by_handle(struct kvm_vcpu *vcpu){
+        u32 objectadd;
+        u32 curr_thread;
+	u32 curr_apc;
+        u32 curr_process;
+        u32 next_process;
+        u32 next_node;
+        u32 curr_node;
+        unsigned long kpcrbase;
+        unsigned long cidtable;
+	/*get kpcr base*/
+	kpcrbase=vcpu->kvm->kpcrbase;
+	printk("kpcrbase:%08x\n",kpcrbase);
+        if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, kpcrbase+0x124, &curr_thread,
+                                4, NULL)) {
+                printk("get current thread failed !\n");
+                return 0;
+        }
+         printk("get current thread :%08x\n",curr_thread);
+
+        /*get current eprocess*/
+         if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_thread+0x40, &curr_apc,
+                                4, NULL)) {
+                printk("get current apc failed !\n");
+                return 0;
+        }
+	printk("get curr_apc :%08x\n",curr_apc);
+	if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_apc+0x10, &curr_process,
+                                4, NULL)) {
+                printk("get current process failed !\n");
+                return 0;
+        }
+	printk("get curr_process :%08x\n",curr_process);
+        curr_node=curr_process+0xb8;
+        if(add_process_to_list(vcpu,curr_process)==0)
+                goto end;
+         printk("get curr process :%08x\n",curr_process);
+        /*get current handletable*/
+         if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_node, &next_node,
+                                4, NULL)) {
+                printk("get next node failed !\n");
+                return 0;
+        }
+        printk("curr_node :%08x\n",curr_node);
+        printk("next_node :%08x\n",next_node);
+        u32 tempadd;
+        while(curr_node!=next_node){
+                next_process=next_node-0xb8;
+                if(add_process_to_list(vcpu,next_process)==0)
+                        goto end;
+                if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, next_node, &tempadd,
+                                4, NULL)) {
+                       printk("get next process  failed !\n");
+                        return 0;
+                }
+                next_node=tempadd;
+                printk("next_node :%08x\n",next_node);
+        }
+         foreach_process_list(&vcpu->kvm->normal_pro_list.pro_list);
+        return 1;
+end:
+	printk("add process failed!\n");
+        return 0;
+}
+
+
+
+
+
+/*operation to normal process list*/
 
 static void enable_security_vm(struct kvm_vcpu *vcpu){
 	vcpu->kvm->is_svm=1;

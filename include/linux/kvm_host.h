@@ -474,6 +474,7 @@ struct kvm {
 	long tlbs_dirty;
 	struct list_head devices;
 /*jack code*/
+	u32 kpcrbase;
 	ServiceDescriptorTableEntry_t *service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
 	int is_svm;
