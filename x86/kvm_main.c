@@ -514,6 +514,7 @@ static struct kvm *kvm_create_vm(unsigned long type)
 	/*add by jack*/
 	kvm->is_alloc=0;
 	kvm->is_svm=0;
+	kvm->process_dirty=1;
 	/*normal process list*/
 	kvm->normal_pro_list.u1.pro_count=0;
         kvm->normal_pro_list.pro_list.next=kvm->normal_pro_list.pro_list.prev=&kvm->normal_pro_list.pro_list;

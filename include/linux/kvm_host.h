@@ -479,6 +479,7 @@ struct kvm {
 	spinlock_t alloc_lock;/*jack code*/
 	int is_svm;
 	int is_alloc;/*jack code*/
+	int process_dirty;
 	 VmInfo vm_info;
 	SeProcess normal_pro_list;
 	SeProcess se_pro_list;

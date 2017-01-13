@@ -4814,30 +4814,117 @@ static int getHandleTable(struct kvm_vcpu *vcpu,u32 *handle_table0);
  * isOK(out):staus identify weather a process is in sec list,1 in 0 out
  *
  * */
-static int handle_is_in_sec(struct kvm_vcpu *vcpu,u32 processhandle,u32 *isOK){
+static u32 handle_to_pid(struct kvm_vcpu *vcpu,u32 processhandle,u32 *processObj){
 	u32 handle_table;
-	u32 processID;
-	u32 objectadd;
-	if(getHandleTable(vcpu,&handle_table)==0){
-		printk("get handle table error!\n");
-		return 0;
-	}
-	if(getProcessByHandle(vcpu,processhandle,handle_table,&objectadd)==0){
-		printk("get process object error!\n");
+        u32 processID;
+        u32 objectadd;
+        if(getHandleTable(vcpu,&handle_table)==0){
+                printk("get handle table error!\n");
                 return 0;
-	}
-	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, objectadd+0xb4, &processID,
+        }
+        if(getProcessByHandle(vcpu,processhandle,handle_table,&objectadd)==0){
+                printk("get process object error!\n");
+                return 0;
+        }
+	if(processObj!=NULL)
+        if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, objectadd+0xb4, &processID,
                                                 sizeof(processID), NULL)) {
                                 printk("read guest processID fail!\n");
                                 return 0;
         }
-	printk("target processID:%d\n",processID);
+	return processID;
+}
+static bool process_is_in_sec(struct kvm_vcpu *vcpu,u32 processID){
 	if(find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,processID)==NULL){
-		*isOK=0; //not security process
+		return 0; //not security process
 	}else	
-		*isOK=1;//is security process
+		return 1;//is security process
+}
+/*is source process a third process*/
+static int is_third_process(struct kvm_vcpu *vcpu,u32 processHandle){
+	u32 processadd;
+	u32 pid;
+	u32 targetCr3;
+	u32 sourceCr3;
+	/*get current CR3*/
+	sourceCr3=vmcs_readl(GUEST_CR3);
+	if(!handle_to_pid(vcpu,processHandle,&processadd)){
+		return 0;	
+	}
+	/*get target CR3*/
+	if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, processadd+0x18, &targetCr3,
+                                                sizeof(targetCr3), NULL)) {
+                                printk("read guest targetCr3 fail!\n");
+                                return 0;
+        }
+	if(sourceCr3==targetCr3)
+		return 0;
 	return 1;
 }
+/*different operation according syscall number*/
+static int handle_exit_by_vmcall(struct kvm_vcpu *vcpu,int nr,u32 processHandle){
+	u32 nr_add;
+	/*if not sec process,return normally*/
+	if(!process_is_in_sec(vcpu,processHandle))
+	{
+		if(nr==79||nr==370)
+			vcpu->kvm->process_dirty=1;
+		 nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                 kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+                 return 1;
+		
+	}
+	switch (nr){
+		/*create process*/
+		case 79:
+			vcpu->kvm->process_dirty=1;
+			break;
+		/*read memory*/
+		case 277:
+			if(is_third_process(vcpu,processHandle)){
+				printk("read from  protected process,deny!\n");
+				kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
+                                        vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+                                        printk("processHandle :%08x\n",processHandle);
+                                        break;			
+			}
+			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                        kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+                	break;
+		/*terminate process*/
+		case 370:
+			if(is_third_process(vcpu,processHandle)){
+				printk("terminate protected process,deny!\n");
+                                kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
+                                        vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+                                        printk("processHandle :%08x\n",processHandle);
+                                        break;
+                        }
+			vcpu->kvm->process_dirty=1;
+			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                        kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+                	break;
+		/*write memory*/
+		case 399:
+			if(is_third_process(vcpu,processHandle)){
+				printk("write to  protected process memory,deny!\n");
+                                kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
+                                        vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+                                        printk("processHandle :%08x\n",processHandle);
+                        		break;
+			}
+			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                        kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+                	break;
+		default:
+			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
+                        kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
+			break;
+	}
+	return 1;
+}
+	
+
 static int handle_exception(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -4898,33 +4985,18 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		/*vm exit by target vmcall*/
 		if(gva_eip==0xffffffff){
 			unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
-			u32 nr_add;
 			u32 guest_esp;
 			guest_esp=vmcs_readl(GUEST_RSP);
-			unsigned long  processID;
-			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, guest_esp+4, &processID,
-						sizeof(processID), NULL)) {
+			unsigned long  processHandle;
+			if (kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, guest_esp+4, &processHandle,
+						sizeof(processHandle), NULL)) {
 				printk("read guest processID fail!\n");
 				return 0;
 			}
 			/* should switch by nr*/
-			if(nr==370&&processID!=0xffffffff&&processID!=0x0){
-				/*incalid operation,deny it and return!*/
-				printk("----------------------------------------\n");
-				u32 isOK=0;
-				handle_is_in_sec(vcpu,processID,&isOK);
-				if(isOK){
-					/*target process is secure process*/
-					kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
-					vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
-					printk("processHandle :%08x\n",processID);
-					return 1;
-				}
-			}
-			/*not sec process ,so just return*/
-			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
-			kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);
-			return 1;		
+			handle_exit_by_vmcall(vcpu,nr,processHandle);
+			return 1;	
+			
 		}	
 		/*target handle*/
 		/*innocent vm exit so just return*/
@@ -4936,18 +5008,6 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		e.address=cr2;
 		kvm_inject_page_fault(vcpu, &e);
 		return 1;
-		/*just return*/
-		/*	
-			if(gva_eip==0xffffffff){
-			printk("this is a vmexit by security module!\n");
-			unsigned long nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
-			unsigned long nr_add;
-			printk("sys call number:%d\n",nr);
-			nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
-			printk("nr_add:%llx\n",nr_add);
-			kvm_register_write(vcpu,VCPU_REGS_RIP,nr_add);    
-			return 1;
-			}*/
 
 		if (kvm_event_needs_reinjection(vcpu))
 			kvm_mmu_unprotect_page_virt(vcpu, cr2);
@@ -4958,7 +5018,8 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 
 	if (vmx->rmode.vm86_active && rmode_exception(vcpu, ex_no))
 		return handle_rmode_exception(vcpu, ex_no, error_code);
-
+	u32 bp_eip;
+	u32 proid;
 	switch (ex_no) {
 		case DB_VECTOR:
 			dr6 = vmcs_readl(EXIT_QUALIFICATION);
@@ -4972,6 +5033,14 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 			kvm_run->debug.arch.dr7 = vmcs_readl(GUEST_DR7);
 			/* fall through */
 		case BP_VECTOR:
+			proid=get_curr_processID(vcpu);
+			printk("debug process:%d\n",proid);
+			if(find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,proid)!=NULL){
+				bp_eip=vmcs_readl(GUEST_RIP);	
+				kvm_register_write(vcpu,VCPU_REGS_RIP,bp_eip+vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
+				printk("in bp mode!\n");
+				return 1;
+			}
 			/*
 			 * Update instruction length as we may reinject #BP from
 			 * user space while in guest debugging mode. Reading it for
@@ -5257,7 +5326,7 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 	trace_kvm_msr_read(ecx, data);
 	/*vcpu->kvm->is_svm==1&&vcpu->kvm->is_alloc==1*/
 	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
-		data=(u64)vcpu->kvm->sysenter_eip.oldeip;
+	//	data=(u64)vcpu->kvm->sysenter_eip.oldeip;
 		printk("read 176h,cheat it:%llx\n",data);
 	}
 	/* FIXME: handling of bits 32:63 of rax, rdx */
@@ -7237,7 +7306,6 @@ static int getPageFromNonsList(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage){
 	u32 knode_add;
 	SLIST_HEADER nonPageSlistHead;
 	u32 nextPage;
-	unsigned int data=0x1a2b3c4d;
 	kvm_read_guest_virt(&vcpu->arch.emulate_ctxt, KpcrBase+0x5ec,&knode_add,
 			sizeof(unsigned int), NULL);
 	printk("knode_add:%08x\n",knode_add);
@@ -7254,14 +7322,6 @@ static int getPageFromNonsList(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *nonpage){
 		printk("pop page error!\n");
 		return 0;
 	}
-	/*if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,*nonpage,&data,4,NULL)){
-	  printk("write data error!\n");
-	  return 0;
-	  }*/
-	/*	if((kvm_clear_guest_page(vcpu->kvm,*nonpage,0,4096))<0){
-		printk("clear error\n");
-		}
-		*/
 
 	return 1;
 
@@ -7500,9 +7560,9 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	}
 	/*set ssdt vmexit*/	
 	unsigned int data=0xffffffff;
-
-	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+OPEN_PROCESS*4,&data,4, NULL)){
-		printk("clear openprocess error,r:%d\n",r);
+	/*clear Target Syscall*/
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+CREATE_PROCESS*4,&data,4, NULL)){
+		printk("clear create process error,r:%d\n",r);
 		return 0;
 	}else{
 		printk("clear openprocess OK!\n");
@@ -7513,6 +7573,18 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	}else{
 		printk("clear openprocess OK!\n");
 	}
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+WRITE_MEMORY*4,&data,4, NULL)){
+                printk("clear openprocess error,r:%d\n",r);
+                return 0;
+        }else{
+                printk("clear openprocess OK!\n");
+        }
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+READ_MEMORY*4,&data,4, NULL)){
+                printk("clear openprocess error,r:%d\n",r);
+                return 0;
+        }else{
+                printk("clear openprocess OK!\n");
+        }
 	/*set ssdt vmexit*/
 	newservicetable=newSsdtBase+offset;
 	offset+=1604;
@@ -7791,9 +7863,6 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 			printk("newfun:%08x\n",newfun);
 			vcpu->kvm->is_alloc=1;
 			printk("service table base:%08x\n",vcpu->kvm->service_table->ServiceTableBase);
-			int nr=190;
-			u32 nr_add = *(unsigned long *)(vcpu->kvm->vm_info.ssdt+nr);
-			printk("nr_add:%08x\n",nr_add);
 		}
 		else
 			vm_info_free_infail(vcpu);	
@@ -7806,27 +7875,28 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<PF_VECTOR));
 		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK,PFERR_FETCH_MASK);
 		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH,PFERR_FETCH_MASK);
+		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<BP_VECTOR));
 	}
 	/*clear old ssdt content*/
-	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
+//	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
 		/*ZW*function will use kifastcallentry,so set it use new one*/
-		/*	setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
-			clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
-			clearold=1;*/
-	}
+//			setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
+//			clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+//			clearold=1;
+//	}
 	spin_unlock(p_lock);
 	/*set RDMSR/MRMSR VM-EXIT*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
 		//printk("not use msr bitmap,set it!\n");
-		//vm_exec |=CPU_BASED_USE_MSR_BITMAPS;
-		//vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
+	//	vm_exec |=CPU_BASED_USE_MSR_BITMAPS;
+	//	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 	}
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
 		//printk("use msr bitmap!\n");
-		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
-		u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
+	//	vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
+	//	u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
 		//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
