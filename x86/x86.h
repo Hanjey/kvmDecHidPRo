@@ -113,11 +113,14 @@ void kvm_after_handle_nmi(struct kvm_vcpu *vcpu);
 int kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip);
 
 void kvm_write_tsc(struct kvm_vcpu *vcpu, struct msr_data *msr);
-
+static int kvm_read_guest_virt_system(struct x86_emulate_ctxt *ctxt,
+                gva_t addr, void *val, unsigned int bytes,
+                struct x86_exception *exception);
 int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 /*jack code*/
+static int get_curr_apc_processID(struct kvm_vcpu *vcpu);
 static int get_curr_processID(struct kvm_vcpu *vcpu);
 static int get_process_list_by_handle(struct kvm_vcpu *vcpu);
 static int foreach_process_list(struct list_head *head);

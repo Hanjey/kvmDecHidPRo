@@ -4265,7 +4265,7 @@ static int kvm_read_guest_virt_system(struct x86_emulate_ctxt *ctxt,
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
 	return kvm_read_guest_virt_helper(addr, val, bytes, vcpu, 0, exception);
 }
-
+EXPORT_SYMBOL_GPL(kvm_read_guest_virt_system);
 int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
 		gva_t addr, void *val,
 		unsigned int bytes,
@@ -6042,15 +6042,54 @@ static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process){
 }
 
 /*traversal active process list in eprocess*/
-static int get_curr_processID(struct kvm_vcpu *vcpu){
+static int get_curr_apc_processID(struct kvm_vcpu *vcpu){
         u32 curr_thread;
 	u32 curr_apc;
         u32 curr_process;
         unsigned long kpcrbase;
 	u32 processID;
 	/*get kpcr base*/
+//	 struct kvm_segment segment_fs;
+  //      kvm_get_segment(vcpu,&segment_fs,VCPU_SREG_FS);
+    //    kpcrbase=segment_fs.base;
 	kpcrbase=vcpu->kvm->kpcrbase;
 	printk("kpcrbase:%08x\n",kpcrbase);
+        if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, kpcrbase+0x124, &curr_thread,
+                                4, NULL)) {
+                printk("get current thread failed !\n");
+                return 0;
+        }
+
+        /*get current eprocess*/
+         if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_thread+0x40, &curr_apc,
+                                4, NULL)) {
+                printk("get current apc failed !\n");
+                return 0;
+        }
+	if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_apc+0x10, &curr_process,
+                                4, NULL)) {
+                printk("get current process failed !\n");
+                return 0;
+        }
+	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,curr_process+0xb4, &processID,4, NULL))
+                {
+                        return 0;
+                }
+        return processID;
+}
+EXPORT_SYMBOL_GPL(get_curr_apc_processID);
+static int get_curr_processID(struct kvm_vcpu *vcpu){
+        u32 curr_thread;
+        u32 curr_apc;
+        u32 curr_process;
+        unsigned long kpcrbase;
+        u32 processID;
+        /*get kpcr base*/
+	struct kvm_segment segment_fs;
+	kvm_get_segment(vcpu,&segment_fs,VCPU_SREG_FS);
+        kpcrbase=segment_fs.base;
+
+        printk("kpcrbase:%08x\n",kpcrbase);
         if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, kpcrbase+0x124, &curr_thread,
                                 4, NULL)) {
                 printk("get current thread failed !\n");
@@ -6059,19 +6098,13 @@ static int get_curr_processID(struct kvm_vcpu *vcpu){
          printk("get current thread :%08x\n",curr_thread);
 
         /*get current eprocess*/
-         if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_thread+0x40, &curr_apc,
-                                4, NULL)) {
-                printk("get current apc failed !\n");
-                return 0;
-        }
-	printk("get curr_apc :%08x\n",curr_apc);
-	if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_apc+0x10, &curr_process,
+        if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_thread+0x150, &curr_process,
                                 4, NULL)) {
                 printk("get current process failed !\n");
                 return 0;
         }
-	printk("get curr_process :%08x\n",curr_process);
-	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,curr_process+0xb4, &processID,4, NULL))
+        printk("get curr_process :%08x\n",curr_process);
+        if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,curr_process+0xb4, &processID,4, NULL))
                 {
                         return 0;
                 }
@@ -6153,7 +6186,6 @@ static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd){
 	u32 processID;
 	 printk("in brosetable1\n");
 	do{	
-		printk("tableadd：%08x\n",tableadd);
 		if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,tableadd, &objectadd,
                                 4, NULL)) {
                 	printk("get  object failed !\n");
@@ -6180,7 +6212,6 @@ static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd){
                          printk("get  process id failed !\n");
                          return 0;
                 }
-		printk("process ID:%d\n",processID);
 		if(find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,processID)!=NULL){
 			tableadd+=8;
 			continue;	
