@@ -4869,7 +4869,7 @@ static int is_third_process(struct kvm_vcpu *vcpu,SeProcess *sep){
 }
 /*different operation according syscall number*/
 static int handle_exit_by_vmcall(struct kvm_vcpu *vcpu,int nr,u32 processHandle){
-	if(processHandle==0x0||processHandle==0xFFFFFFFF)
+	if(processHandle==0x0||processHandle==0xFFFFFFFF||processHandle==-1)
 		goto end;
 	u32 nr_add;
 	u64  sepp=0;
@@ -5047,13 +5047,19 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		return handle_rmode_exception(vcpu, ex_no, error_code);
 	u32 bp_eip;
 	u32 proid;
+	u32 apcadd;
+	u32 belongpro;
+	u32 curr_processadd;
 	switch (ex_no) {
 		case DB_VECTOR:
 			/*jack begin*/
-			proid=get_curr_apc_processID(vcpu);
+			proid=get_curr_apc_processID(vcpu,&curr_processadd,&apcadd,&belongpro);
                         printk("debug process:%d\n",proid);
                         if(find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,proid)!=NULL){
                                 bp_eip=vmcs_readl(GUEST_RIP);
+				if(curr_processadd!=NULL)
+					kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_processadd+0xec,
+                                0x0, 4, NULL);	
                                 kvm_register_write(vcpu,VCPU_REGS_RIP,bp_eip+vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
                                 printk("in DB mode!\n");
                                 return 1;
@@ -5071,11 +5077,18 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 			/* fall through */
 		case BP_VECTOR:
 			/*jack begin*/
-			proid=get_curr_apc_processID(vcpu);
+			proid=get_curr_apc_processID(vcpu,&curr_processadd,&apcadd,&belongpro);
 			printk("debug process:%d\n",proid);
 			if(find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,proid)!=NULL){
 				bp_eip=vmcs_readl(GUEST_RIP);	
-				kvm_register_write(vcpu,VCPU_REGS_RIP,bp_eip+vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
+				if(curr_processadd!=NULL){
+                                        kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_processadd+0xec,0x0, 4, NULL);
+				 kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, curr_processadd+0xf0,0x0, 4, NULL);}
+				if(apcadd!=0&&belongpro!=0)
+					// kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, apcadd+0x10,
+                                //belongpro, 4, NULL);
+                                printk("vcpu->kvm->ret_add:%08x\n",vcpu->kvm->ret_add);
+				kvm_register_write(vcpu,VCPU_REGS_RIP,vcpu->kvm->ret_add);
 				printk("in BP mode!\n");
 				return 1;
 			}
@@ -7735,6 +7748,14 @@ static int createJmpFun(struct kvm_vcpu *vcpu,u32 fastcallAdd,unsigned int newBa
 	}
 	printk("code_sys2:%08x\n",newBase+offset);
 	offset+=9;
+	/*BP/DB retrun code*/
+	char code_ret=0xcf;
+	 if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newBase+offset,&code_ret,1, NULL)){
+                printk("set code_ret:%d\n",r);
+                return 0;
+        }
+	printk("code_ret:%08x\n",newBase+offset);
+	vcpu->kvm->ret_add=newBase+offset;
 	/*set KISystemService*/
 	return offset;
 }
@@ -7908,7 +7929,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//spin_unlock(p_lock);
 	if(vcpu->kvm->is_alloc==1&&newfun!=0){
 		/*set new kifastcallentry*/
-		setNewSsdt((u64)newfun);
+//		setNewSsdt((u64)newfun);
 		/*set target  PF_VECTOR exit*/
 		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<PF_VECTOR));
 		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK,PFERR_FETCH_MASK);

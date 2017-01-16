@@ -477,6 +477,7 @@ struct kvm {
 	u32 kpcrbase;
 	ServiceDescriptorTableEntry_t *service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
+	unsigned int ret_add;
 	int is_svm;
 	int is_alloc;/*jack code*/
 	int process_dirty;
