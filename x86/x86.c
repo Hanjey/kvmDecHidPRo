@@ -5911,7 +5911,10 @@ static int foreach_process_list(struct list_head *head){
 	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
-		printk("[%2d] process id: [%4d]  process name: [%30s]  DirectoryBase:[0x%08x]\n",i,temp->u1.pro_id,temp->image_name,temp->DirectoryBase);
+		if(temp->u1.pro_id!=0)
+			printk("[%2d] process id: [%4d]  process name: [%20s]  DirectoryBase:[0x%08x]\n",i,temp->u1.pro_id,temp->image_name,temp->DirectoryBase);
+		else
+			printk("[%2d] process name: [%25s] \n",i,temp->image_name);
 		p=p->next;
 		i++;
 	}
@@ -5966,49 +5969,66 @@ static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid)
 
 }
 EXPORT_SYMBOL_GPL(find_se_process_by_pid);
+static struct  list_head* find_se_process_by_pname(struct list_head *head,char *pname){
+        struct list_head *p=head->next;
+        SeProcess *temp;
+        while(p!=head){
+                temp=(SeProcess *)p;
+                if(strcmp(temp->image_name,pname)==0)
+                        return p;
+                p=p->next;
+        }
+        return NULL;
+
+}
+EXPORT_SYMBOL_GPL(find_se_process_by_pname);
 static int get_process_list_by_handletable(struct kvm_vcpu *vcpu);
 
 /*operation by vm*/
 /*handle vm virtual address*/
 static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	/*if process count ==0 || processs_dirty==1*/
-	//if(vcpu->kvm->normal_pro_list.u1.pro_count==0||vcpu->kvm->process_dirty==1){
-	if(get_process_list_by_handletable(vcpu)==0)
-		return 0;	
-	//}
+	/*if(vcpu->kvm->normal_pro_list.u1.pro_count==0){
+		if(get_process_list_by_handletable(vcpu)==0)
+			return 0;	
+	}*/
 	SeProcess *sepro;
 	SeProcess *temp;
 	sepro=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
-	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pa, &sepro->u1.pro_id,4, NULL))
+	/*security process do not store pid*/
+	sepro->u1.pro_id=0;
+	/*if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pa, &sepro->u1.pro_id,4, NULL))
+	{
+		return 0;
+	}*/
+	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pa+4, &sepro->image_name,30, NULL))
 	{
 		return 0;
 	}
-	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pa+4, &sepro->image_name,20, NULL))
-	{
-		return 0;
-	}
-	temp=(SeProcess *)find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,sepro->u1.pro_id);
+	/*temp=(SeProcess *)find_se_process_by_pname(&vcpu->kvm->normal_pro_list.pro_list,sepro->image_name);*/
 	/*if target process is not in normal list*/
-	if(temp==NULL)
-		return 0;
-	sepro->DirectoryBase=temp->DirectoryBase;
+/*	if(temp==NULL)
+		return 0;*/
+	sepro->DirectoryBase=0;
 	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro->pro_list);
 	vcpu->kvm->se_pro_list.u1.pro_count++;
-	printk("add process :[%4d]------total count:[%2d]\n",sepro->u1.pro_id,vcpu->kvm->se_pro_list.u1.pro_count);
+	printk("add process :[%20s]------total count:[%2d]\n",sepro->image_name,vcpu->kvm->se_pro_list.u1.pro_count);
 	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
+
 static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	struct list_head *p;
-	int sepid;
-	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa,&sepid,4, NULL))
+	char pname[30];
+	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa+4,pname,30, NULL))
 	{
 		return 0;
 	}
-	p=find_se_process_by_pid(&vcpu->kvm->se_pro_list.pro_list,sepid);
+	p=find_se_process_by_pname(&vcpu->kvm->se_pro_list.pro_list,pname);
+	if(p==NULL) return 0;
 	del_list(&vcpu->kvm->se_pro_list.pro_list,p);	
 	vcpu->kvm->se_pro_list.u1.pro_count--;
-	printk("del process :%d------total count:%d\n",sepid,vcpu->kvm->se_pro_list.u1.pro_count);
+	printk("del process :%s------total count:%d\n",pname,vcpu->kvm->se_pro_list.u1.pro_count);
 	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
@@ -6025,7 +6045,7 @@ typedef struct _UNICODE_STRING
 	u16 length,MaximumLength;
 	u32 buffer;
 }UNICODE_STRING;
-int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro_name){
+static int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro_name){
 	u32 punicode_name;
         UNICODE_STRING proname;
         u16 processName_w[256];
@@ -6048,7 +6068,6 @@ int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro_name){
                         break;
                 }
         }
-        printk("a=%d\n",a);
         for(i=0;i<(proname.length/2-a);i++){
                 proname_s[i]=processName_w[a+i+1];
         }
@@ -6056,6 +6075,7 @@ int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro_name){
         memcpy(pro_name,proname_s,30);
 	return 1;	
 }
+EXPORT_SYMBOL_GPL(get_proname_by_path);
 static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process){
 	SeProcess *tempNode;
 	u32 punicode_name;		
@@ -6085,8 +6105,9 @@ setcr3:
 	return 1;
 }
 
+EXPORT_SYMBOL_GPL(add_process_to_list);
 /*traversal active process list in eprocess*/
-static int get_curr_apc_processID(struct kvm_vcpu *vcpu,u32 *curr_processadd,u32 *apcadd,u32 *belongprocess){
+static int get_curr_apc_processName(struct kvm_vcpu *vcpu,u32 *curr_processadd,char *pname,u32 *apcadd,u32 *belongprocess){
 	u32 curr_thread;
 	u32 curr_apc;
 	u32 curr_process;
@@ -6125,15 +6146,19 @@ static int get_curr_apc_processID(struct kvm_vcpu *vcpu,u32 *curr_processadd,u32
 		printk("get current process failed !\n");
 		return 0;
 	}
-	*curr_processadd=curr_process;
+	*curr_processadd=curr_process;	
+	if(get_proname_by_path(vcpu,curr_process,pname)==0){
+		printk("get process name failed!\n");
+		return 0;
+	}	
 	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,curr_process+0xb4, &processID,4, NULL))
 	{
 		return 0;
 	}
 	return processID;
 }
-EXPORT_SYMBOL_GPL(get_curr_apc_processID);
-static int get_curr_processID(struct kvm_vcpu *vcpu){
+EXPORT_SYMBOL_GPL(get_curr_apc_processName);
+static int get_curr_processName(struct kvm_vcpu *vcpu,char *pname,u32 *processadd){
 	u32 curr_thread;
 	u32 curr_apc;
 	u32 curr_process;
@@ -6156,13 +6181,19 @@ static int get_curr_processID(struct kvm_vcpu *vcpu){
 		printk("get current process failed !\n");
 		return 0;
 	}
+	if(processadd!=NULL)
+		*processadd=curr_process;
+	 if(get_proname_by_path(vcpu,curr_process,pname)==0){
+                printk("get process name failed!\n");
+                return 0;
+        }	
 	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,curr_process+0xb4, &processID,4, NULL))
 	{
 		return 0;
 	}
-	return processID;
+	return 1;
 }
-EXPORT_SYMBOL_GPL(get_curr_processID);
+EXPORT_SYMBOL_GPL(get_curr_processName);
 /*traverse pspcidtable*/
 static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *cidtable){
 	u32 kdVersionBlock;
@@ -6286,13 +6317,11 @@ static int get_process_list_by_handletable(struct kvm_vcpu *vcpu){
 		printk("get pspcidtable failed!\n");
 		return 0;
 	}
-	printk("pspcidtable:%08x\n",pspcidtable);
 	if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pspcidtable, &tableCode,
 				4, NULL)) {
 		printk("get  table code failed !\n");
 		return 0;
 	}
-	printk("tablecode:%08x\n",tableCode);
 	index=tableCode&0x3;	
 	tableadd=tableCode&0xfffffffc;
 	switch(index){
@@ -6308,7 +6337,7 @@ static int get_process_list_by_handletable(struct kvm_vcpu *vcpu){
 	}
 	printk("update process list:\n");
 	foreach_process_list(&vcpu->kvm->normal_pro_list.pro_list);
-	vcpu->kvm->process_dirty=0;	
+	//vcpu->kvm->process_dirty=0;	
 	return 1;
 }
 
