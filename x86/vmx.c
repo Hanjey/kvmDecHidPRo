@@ -4978,10 +4978,6 @@ static int handle_exit_by_vmcall(struct kvm_vcpu *vcpu,int nr,u32 processHandle)
 	u32 curr_pid;
 	u32 objadd;
 	char pname[30];
-	if(nr ==79){ 
-		//vcpu->kvm->process_dirty=1;
-		goto end_handle;
-	}
 	/*handle not normal situation*/
 	if(processHandle==0x0||processHandle==0xFFFFFFFF||processHandle==-1){
 		printk("nr in invalidhandle:%d\n",nr);
@@ -5008,6 +5004,16 @@ static int handle_exit_by_vmcall(struct kvm_vcpu *vcpu,int nr,u32 processHandle)
 	SeProcess *sep=(SeProcess *)((u64 *)sepp);
 	//goto end;
 	switch (nr){
+		/*attach process*/
+		case 96:
+			if(is_third_process(vcpu,sep)){
+                                printk("attach  protected process,deny!\n");
+                                kvm_register_write(vcpu,VCPU_REGS_RAX,0xC0000022);
+                                vmcs_writel(GUEST_RIP,vcpu->kvm->sysenter_eip.oldeip+0x12a);
+                                return 1;
+                        }
+                        goto end_handle;
+                        break;
 		/*read memory*/
 		case 277:
 			if(is_third_process(vcpu,sep)){
@@ -7676,6 +7682,7 @@ static int getSSDT(struct kvm_vcpu *vcpu,u64 KpcrBase,ServiceDescriptorTableEntr
 /*get ssdt address end*/
 #define CREATE_PROCESS 79
 #define OPEN_PROCESS 190
+#define DEBUG_ACTIVE_PROCESS 96 
 #define TERMINAL_PROCESS 370
 #define WRITE_MEMORY  277
 #define READ_MEMORY 399
@@ -7715,12 +7722,11 @@ static int createNewSsdt(struct kvm_vcpu *vcpu,ServiceDescriptorTableEntry_t *ss
 	/*set ssdt vmexit*/	
 	unsigned int data=0xffffffff;
 	/*clear Target Syscall*/
-	/*if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+CREATE_PROCESS*4,&data,4, NULL)){
-		printk("clear create process error,r:%d\n",r);
+	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+DEBUG_ACTIVE_PROCESS*4,&data,4, NULL)){
 		return 0;
 	}else{
-		printk("clear openprocess OK!\n");
-	}*/
+		printk("clear DEBUG_ACTIVE_PROCESS OK!\n");
+	}
 	if(r=kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,newSsdtBase+offset+TERMINAL_PROCESS*4,&data,4, NULL)){
 		printk("clear TERMINAL_PROCESS error,r:%d\n",r);
 		return 0;
