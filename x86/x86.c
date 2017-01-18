@@ -6020,10 +6020,12 @@ static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	struct list_head *p;
 	char pname[30];
-	if(kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,pa+4,pname,30, NULL))
+	printk("in remove process!\n");
+	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,pa+4,pname,30, NULL))
 	{
 		return 0;
 	}
+	printk("process name:%s\n",pname);
 	p=find_se_process_by_pname(&vcpu->kvm->se_pro_list.pro_list,pname);
 	if(p==NULL) return 0;
 	del_list(&vcpu->kvm->se_pro_list.pro_list,p);	
