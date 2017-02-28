@@ -5911,7 +5911,7 @@ static int foreach_process_list(struct list_head *head){
 	printk("seucre process list:\n");
 	while(p!=head){
 		temp=(SeProcess *)p;
-		if(temp->u1.pro_id!=0)
+		if(temp->u1.pro_id!=0&&temp->u1.pro_id!=-1)
 			printk("[%2d] process id: [%4d]  process name: [%20s]  DirectoryBase:[0x%08x]\n",i,temp->u1.pro_id,temp->image_name,temp->DirectoryBase);
 		else
 			printk("[%2d] process name: [%25s] \n",i,temp->image_name);

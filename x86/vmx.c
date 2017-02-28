@@ -5487,7 +5487,7 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 	trace_kvm_msr_read(ecx, data);
 	/*vcpu->kvm->is_svm==1&&vcpu->kvm->is_alloc==1*/
 	if(vcpu->kvm->is_alloc==1&&ecx==0x176){
-		//	data=(u64)vcpu->kvm->sysenter_eip.oldeip;
+		data=(u64)vcpu->kvm->sysenter_eip.oldeip;
 		printk("read 176h,cheat it:%llx\n",data);
 	}
 	/* FIXME: handling of bits 32:63 of rax, rdx */
@@ -8045,29 +8045,22 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH,PFERR_FETCH_MASK);
 		vmcs_write32(EXCEPTION_BITMAP,vmcs_read32(EXCEPTION_BITMAP)|(1<<BP_VECTOR));
 	}
+	}
 	/*clear old ssdt content*/
-	//	if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
+		if(vcpu->kvm->is_alloc==1&&newfun!=0&&clearold==0){
 	/*ZW*function will use kifastcallentry,so set it use new one*/
-	//			setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
-	//			clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
-	//			clearold=1;
-	//	}
+				setSysServiceJmp(vcpu,guest_sysenter_eip,newfun+165);
+				clearOldSsdt(vcpu,vcpu->kvm->service_table->ServiceTableBase);
+				clearold=1;
+		}
 	spin_unlock(p_lock);
 	/*set RDMSR/MRMSR VM-EXIT*/
 	u32 vm_exec=vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 	//printk("CPU_BASED_VM_EXEC_CONTROL:%08x\n",vm_exec);
 	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
 		//printk("not use msr bitmap,set it!\n");
-		//	vm_exec |=CPU_BASED_USE_MSR_BITMAPS;
-		//	vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
-	}
-	if((vm_exec&CPU_BASED_USE_MSR_BITMAPS)){
-		//printk("use msr bitmap!\n");
-		vm_exec &=~CPU_BASED_USE_MSR_BITMAPS;
-		//	u64 msr_bitmap=vmcs_read64(MSR_BITMAP);
-		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
-		//setMsrBitMap(msr_bitmap,0x176,MSR_TYPE_R);
-		//	setMsrBitMap(0x176,msr_bitmap,MSR_TYPE_W);
+			vm_exec &= ~CPU_BASED_USE_MSR_BITMAPS;
+			vmcs_write32(CPU_BASED_VM_EXEC_CONTROL,vm_exec);
 	}
 	/*test msr*/
 	//	if(vcpu->kvm->is_alloc==1&&newidt!=0){
