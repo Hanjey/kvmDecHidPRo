@@ -5874,6 +5874,7 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 static int insert_list(struct list_head *head,struct list_head *node){
 	node->next=head->next;
 	node->prev=head;
+	head->next->prev=node;
 	head->next=node;
 	return 1;
 
@@ -5906,15 +5907,15 @@ static int foreach_process_list(struct list_head *head){
 		return 0;
 	}
 	struct list_head *p=head->next;
-	SeProcess *temp;
+	ProcessInfo *temp;
 	int i=1;
-	printk("seucre process list:\n");
+	printk("true process list:\n");
 	while(p!=head){
-		temp=(SeProcess *)p;
-		if(temp->u1.pro_id!=0&&temp->u1.pro_id!=-1)
-			printk("[%2d] process id: [%4d]  process name: [%20s]  DirectoryBase:[0x%08x]\n",i,temp->u1.pro_id,temp->image_name,temp->DirectoryBase);
+		temp=(ProcessInfo *)p;
+		if(temp->u1.pro_id!=-1)
+			printk("[%2d] process id: [%4d]  process name: [%20s]",temp->u1.pro_id,temp->image_name  );
 		else
-			printk("[%2d] process name: [%25s] \n",i,temp->image_name);
+			break;
 		p=p->next;
 		i++;
 	}
@@ -5933,6 +5934,7 @@ static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address
 	int i=0;
 	while(p!=head){
 		temp=(SeProcess *)p;
+		
 		if(kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt, pro_list_address,&temp->u1.pro_id,4, NULL))
 		{
 			printk("fail to write process ID!\n");
@@ -5944,6 +5946,7 @@ static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address
 			return 0;
 		}
 		pro_list_address+=34;
+	
 		p=p->next;
 		i++;
 	}
@@ -5958,9 +5961,9 @@ static int query_se_process(struct kvm_vcpu *vcpu, unsigned int pro_list_address
 }
 static struct  list_head* find_se_process_by_pid(struct list_head *head,int pid){
 	struct list_head *p=head->next;
-	SeProcess *temp;
+	ProcessInfo *temp;
 	while(p!=head){
-		temp=(SeProcess *)p;
+		temp=(ProcessInfo *)p;
 		if(temp->u1.pro_id==pid)
 			return p;
 		p=p->next;
@@ -5982,7 +5985,6 @@ static struct  list_head* find_se_process_by_pname(struct list_head *head,char *
 
 }
 EXPORT_SYMBOL_GPL(find_se_process_by_pname);
-static int get_process_list_by_handletable(struct kvm_vcpu *vcpu);
 
 /*operation by vm*/
 /*handle vm virtual address*/
@@ -6009,13 +6011,14 @@ static int add_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	/*if target process is not in normal list*/
 /*	if(temp==NULL)
 		return 0;*/
-	sepro->DirectoryBase=0;
+	sepro->count=0;
 	insert_list(&vcpu->kvm->se_pro_list.pro_list,&sepro->pro_list);
 	vcpu->kvm->se_pro_list.u1.pro_count++;
 	printk("add process :[%20s]------total count:[%2d]\n",sepro->image_name,vcpu->kvm->se_pro_list.u1.pro_count);
-	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
+//	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
+
 
 static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	struct list_head *p;
@@ -6031,16 +6034,22 @@ static int remove_se_process(struct kvm_vcpu *vcpu,unsigned int pa){
 	del_list(&vcpu->kvm->se_pro_list.pro_list,p);	
 	vcpu->kvm->se_pro_list.u1.pro_count--;
 	printk("del process :%s------total count:%d\n",pname,vcpu->kvm->se_pro_list.u1.pro_count);
-	foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
+	//foreach_process_list(&vcpu->kvm->se_pro_list.pro_list);
 	return 1;
 }
 /*operation to normal process list*/
 static int del_process_in_list(struct kvm_vcpu *vcpu,u32 processID){
 	struct list_head *p;
-	p=find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,processID);
-	del_list(&vcpu->kvm->normal_pro_list.pro_list,p);
-	vcpu->kvm->normal_pro_list.u1.pro_count--;
-	return 1;
+	p=find_se_process_by_pid(&vcpu->kvm->true_process_list.pro_list,processID);
+	if(p==NULL){
+		printk("not find target process!\n");
+		return -1;
+	}
+	ProcessInfo *pro=(ProcessInfo *)p;
+        printk("del process:%s\n",pro->image_name);
+	del_list(&vcpu->kvm->true_process_list.pro_list,p);
+	vcpu->kvm->true_process_list.u1.pro_count--;
+	return 0;
 }
 typedef struct _UNICODE_STRING
 {
@@ -6078,32 +6087,35 @@ static int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro
 	return 1;	
 }
 EXPORT_SYMBOL_GPL(get_proname_by_path);
-static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process){
-	SeProcess *tempNode;
+static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process,u32 targetpid){
+	ProcessInfo *tempNode;
 	u32 punicode_name;		
 	//	memset(proname_s,0,30);
-	tempNode=(SeProcess *)kmalloc(sizeof(SeProcess),GFP_KERNEL);
-	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0xb4, &tempNode->u1.pro_id,4, NULL))
+	tempNode=(ProcessInfo *)kmalloc(sizeof(ProcessInfo),GFP_KERNEL);
+	tempNode->u1.pro_id=targetpid;
+/*	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0xb4, &tempNode->u1.pro_id,4, NULL))
 	{
 		return 0;
-	}
+	}*/
 	if(tempNode->u1.pro_id==4||tempNode->u1.pro_id==0){
 		if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0x16c, tempNode->image_name,15, NULL))
 		{
 			return 0;
 		}
-		goto setcr3;
+		goto insert_node;
 	}
+	/*get full image name*/
 	if(get_proname_by_path(vcpu,next_process,tempNode->image_name)==0)
 		return 0;
 	//printk("processname:%s\n",proname_s);
-setcr3:
-	if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0x18, &tempNode->DirectoryBase,4, NULL))
+	/*if(kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,next_process+0x18, &tempNode->DirectoryBase,4, NULL))
 	{
 		return 0;
-	}
-	insert_list(&vcpu->kvm->normal_pro_list.pro_list,&tempNode->pro_list);
-	vcpu->kvm->normal_pro_list.u1.pro_count++;
+	}*/
+insert_node:
+	printk("insert process:%d %s\n",targetpid,tempNode->image_name);
+	insert_list(&vcpu->kvm->true_process_list.pro_list,&tempNode->pro_list);
+	vcpu->kvm->true_process_list.u1.pro_count++;
 	return 1;
 }
 
@@ -6222,10 +6234,11 @@ static int getPspCidTable(struct kvm_vcpu *vcpu,u64 KpcrBase,u32 *cidtable){
 	return 1;
 }
 /*tap level*/
-static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd);
-static int brosetable2(struct kvm_vcpu *vcpu,u32 tableadd);
-static int brosetable3(struct kvm_vcpu *vcpu,u32 tableadd);
-static int brosetable3(struct kvm_vcpu *vcpu,u32 tableadd){
+static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid);
+static int brosetable2(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid);
+static int brosetable3(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid);
+
+static int brosetable3(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid){
 	u32 table2add;
 	u32 count=0;
 	u32 limit=1024;
@@ -6237,14 +6250,14 @@ static int brosetable3(struct kvm_vcpu *vcpu,u32 tableadd){
 			return 0;
 		}
 		if(table2add!=0)
-			brosetable2(vcpu,table2add);
+			brosetable2(vcpu,table2add,targetpid);
 		tableadd+=4;
 		count++;
 	}
 	return 1;
 }
 /*mid level*/
-static int brosetable2(struct kvm_vcpu *vcpu,u32 tableadd){
+static int brosetable2(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid){
 	u32 table3add;
 	u32 count=0;
 	u32 limit=1024;
@@ -6256,14 +6269,14 @@ static int brosetable2(struct kvm_vcpu *vcpu,u32 tableadd){
 			return 0;
 		}
 		if(table3add!=0)
-			brosetable1(vcpu,table3add);
+			brosetable1(vcpu,table3add,targetpid);
 		tableadd+=4;
 		count++;
 	}
 	return 1;
 }
 /*last level*/
-static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd){
+static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd,u32 targetpid){
 	u32 limit=511;
 	u32 objectadd;
 	u32 objectheader;
@@ -6288,29 +6301,39 @@ static int brosetable1(struct kvm_vcpu *vcpu,u32 tableadd){
 			printk("get  object type failed !\n");
 			return 0;
 		}
+		/*if object is not process*/
 		if((u32)objecttype!=7){
 			tableadd+=8;
 			continue;
 		}
-		if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,objectadd+0xb4, &processID,
-					4, NULL)) {
-			printk("get  process id failed !\n");
-			return 0;
+		if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,objectadd+0xb4, &processID,4, NULL)) {
+                        printk("get  process ID failed!\n");
+                        return 0;
+                }
+		/*walk mod*/
+		if(vcpu->kvm->gloflag==0){
+			if(add_process_to_list(vcpu,objectadd,processID)==0){
+                 	       printk("add process %d failed!\n",processID);
+                        	break;
+                	}
+			 tableadd+=8;
+                        continue;
 		}
-
-		if(find_se_process_by_pid(&vcpu->kvm->normal_pro_list.pro_list,processID)!=NULL){
-			tableadd+=8;
-			continue;	
+		/*find mod*/
+		if(processID!=targetpid){
+			tableadd+=8;	
+			continue;
 		}
-		if(add_process_to_list(vcpu,objectadd)==0){
+		/*get target process*/
+		if(add_process_to_list(vcpu,objectadd,processID)==0){
 			printk("add process %d failed!\n",processID);
 			break;
 		}
-		tableadd+=8;
+		break;
 	}while(limit--);
 	return 1;
 }
-static int get_process_list_by_handletable(struct kvm_vcpu *vcpu){
+ int get_process_list_by_handletable(struct kvm_vcpu *vcpu,u32 targetpid){
 	u32 pspcidtable;
 	u32 index;
 	u32 tableCode;
@@ -6327,23 +6350,21 @@ static int get_process_list_by_handletable(struct kvm_vcpu *vcpu){
 	index=tableCode&0x3;	
 	tableadd=tableCode&0xfffffffc;
 	switch(index){
-		case 0:brosetable1(vcpu,tableadd);
+		case 0:brosetable1(vcpu,tableadd,targetpid);
 		       break;
-		case 1:brosetable2(vcpu,tableadd);
+		case 1:brosetable2(vcpu,tableadd,targetpid);
 		       break;
-		case 2:brosetable3(vcpu,tableadd);
+		case 2:brosetable3(vcpu,tableadd,targetpid);
 		       break;
 		default:
 		       return 0;
 		       break;
 	}
-	printk("update process list:\n");
-	foreach_process_list(&vcpu->kvm->normal_pro_list.pro_list);
-	//vcpu->kvm->process_dirty=0;	
+	//foreach_process_list(&vcpu->kvm->true_process_list.pro_list);
 	return 1;
 }
 
-
+EXPORT_SYMBOL_GPL(get_process_list_by_handletable);
 
 /*operation to normal process list*/
 
@@ -6374,15 +6395,98 @@ static int jack_handle_op(struct kvm_vcpu *vcpu,int opcode,unsigned int pa){
 }
 /*jack code*/
 
+#define GET_BASE 30
+#define PROCESS_LIFE 0x31
 
+#define KVM_QUERY_HIDDEN_PROCESS 25
+#define MAX_PROCESS_NUM 60
+typedef struct Hidden_process_info
+{
+	int processID;
+	char image_name[30];
+}HiddenProcessInfo;
 
+static int getHiddenProcess(struct kvm_vcpu *vcpu,unsigned int currproadd,unsigned int hiddenproadd){
+	struct list_head *head=&vcpu->kvm->true_process_list.pro_list;
+	struct list_head *p=head->next;
+	ProcessInfo *pp;
+	int i=0,totalcount=0;
+	int tempid;
+	int *curr_process=kmalloc(sizeof(int)*MAX_PROCESS_NUM,GFP_KERNEL);
+	memset(curr_process,0,sizeof(int)*MAX_PROCESS_NUM);
+	while(i<MAX_PROCESS_NUM){
+		if (kvm_read_guest_virt_system(&vcpu->arch.emulate_ctxt,currproadd,&curr_process[i],
+                                4, NULL)) {
+                	printk("get  table code failed !\n");
+                	return 0;
+        	}
+		printk("curr_pid:%d\n",curr_process[i]);
+		if(curr_process[i]==-1)break;
+		currproadd+=4;
+		i++;
+		
+	}
+	totalcount=i;
+	printk("total %d process!\n",i);
+	i=0;
+	int finpid=-1;
+	int isfind=0;
+	while(p!=head){
+		pp=(ProcessInfo *)p;
+		while(i<totalcount){
+			if(pp->u1.pro_id==curr_process[i++]){
+				isfind=1;
+				break;
+			}
+		}
+		if(!isfind){
+			printk("hidden processID：%d  pname:%s\n",pp->u1.pro_id,pp->image_name);
+			kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,hiddenproadd,&pp->u1.pro_id,4, NULL);
+			kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,hiddenproadd+4,&pp->image_name,30, NULL);
+                	hiddenproadd+=34;
+		}	
+		p=p->next;
+		i=0;
+		isfind=0;
+	}
+	kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,hiddenproadd,&finpid,4, NULL);
+	printk("detect OK!\n",i);
+	return 1;
+}
+/*terminate process operation*/
+
+/*get nonpage base*/
+static int getnonpagebase(struct kvm_vcpu *vcpu,u32 address){
+	printk("get nonpage address:%08x\n",address);
+	kvm_write_guest_virt_system(&vcpu->arch.emulate_ctxt,address,&vcpu->kvm->nonpagebase,4, NULL);	
+	return 0;
+}
+/*process life*/
+static int processlife(struct kvm_vcpu *vcpu,u32 processID,u32 createFlag){
+	printk("createFlag:%d\n",createFlag);
+	if(createFlag){
+		if(vcpu->kvm->gloflag==0){
+			printk("first time walk entire cidtable\n");
+        	        get_process_list_by_handletable(vcpu,processID);
+                	vcpu->kvm->gloflag=1;
+        	}else{
+			get_process_list_by_handletable(vcpu,processID);
+			printk("create process:%d\n",processID);
+		}
+	}else{
+	/*first find process in trul list,then remove it*/	
+		del_process_in_list(vcpu,processID);
+		printk("terminate process:%d\n",processID);
+	}
+	return 0;
+}
 /*open security vm according different parm*/
 int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
 	unsigned long nr, a0, a1, a2, a3, ret;
 	int r = 1;
 	nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
-	if (kvm_hv_hypercall_enabled(vcpu->kvm)&&nr!=20&&nr!=24)
+	if (kvm_hv_hypercall_enabled(vcpu->kvm)&&nr!=30&&nr!=0x31&&nr!=25)
 		return kvm_hv_hypercall(vcpu);
 
 	a0 = kvm_register_read(vcpu, VCPU_REGS_RBX);
@@ -6390,10 +6494,17 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 	a2 = kvm_register_read(vcpu, VCPU_REGS_RDX);
 	a3 = kvm_register_read(vcpu, VCPU_REGS_RSI);
 	printk("eax:%d\n",nr);
-	trace_kvm_hypercall(nr, a0, a1, a2, a3);
+	 trace_kvm_hypercall(nr, a0, a1, a2, a3);
 
-	if (!is_long_mode(vcpu)) {
+        if (!is_long_mode(vcpu)) {
 		nr &= 0xFFFFFFFF;
+		a0 &= 0xFFFFFFFF;
+		a1 &= 0xFFFFFFFF;
+		a2 &= 0xFFFFFFFF;
+		a3 &= 0xFFFFFFFF;
+	}
+	//vm-exit from VM kernel is recommanded!
+	/*
 		a0 &= 0xFFFFFFFF;
 		a1 &= 0xFFFFFFFF;
 		a2 &= 0xFFFFFFFF;
@@ -6412,18 +6523,21 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		case KVM_HC_VAPIC_POLL_IRQ:
 			ret = 0;
 			break;
-		case JACK_OP_CODE:
-			ret=jack_handle_op(vcpu,a1,a0);
+		/*request for query hidden process*/
+		case KVM_QUERY_HIDDEN_PROCESS:
+			ret=getHiddenProcess(vcpu,a0,a1);
+			break;	
+		/*request for nonpage base*/
+		case GET_BASE:
+		/*a0 address of variable*/
+			ret=getnonpagebase(vcpu,a0);
 			break;
-		case PROCDESS_QUERY_CODE:
-			ret=query_se_process(vcpu,a0);
+		/*create process notify*/
+		case PROCESS_LIFE:
+		/*a1 processID, a0 create flag 1==create 0==close*/
+			ret=processlife(vcpu,a1,a0);
 			break;
-		case KVM_ENABLE_SECURITY:
-			enable_security_vm(vcpu);
-			break;
-		case KVM_DISABLE_SECURITY:
-			disable_security_vm(vcpu);
-			break;
+		/*close process notify*/
 		default:
 			ret = -KVM_ENOSYS;
 			break;
@@ -8145,17 +8259,17 @@ void kvm_arch_async_page_not_present(struct kvm_vcpu *vcpu,
 	kvm_add_async_pf_gfn(vcpu, work->arch.gfn);
 
 	if (!(vcpu->arch.apf.msr_val & KVM_ASYNC_PF_ENABLED) ||
-			(vcpu->arch.apf.send_user_only &&
-			 kvm_x86_ops->get_cpl(vcpu) == 0))
-		kvm_make_request(KVM_REQ_APF_HALT, vcpu);
-	else if (!apf_put_user(vcpu, KVM_PV_REASON_PAGE_NOT_PRESENT)) {
-		fault.vector = PF_VECTOR;
-		fault.error_code_valid = true;
-		fault.error_code = 0;
-		fault.nested_page_fault = false;
-		fault.address = work->arch.token;
-		kvm_inject_page_fault(vcpu, &fault);
-	}
+	(vcpu->arch.apf.send_user_only &&
+                         kvm_x86_ops->get_cpl(vcpu) == 0))
+                kvm_make_request(KVM_REQ_APF_HALT, vcpu);
+        else if (!apf_put_user(vcpu, KVM_PV_REASON_PAGE_NOT_PRESENT)) {
+                fault.vector = PF_VECTOR;
+                fault.error_code_valid = true;
+                fault.error_code = 0;
+                fault.nested_page_fault = false;
+                fault.address = work->arch.token;
+                kvm_inject_page_fault(vcpu, &fault);
+        }
 }
 
 void kvm_arch_async_page_present(struct kvm_vcpu *vcpu,

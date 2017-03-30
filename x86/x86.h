@@ -120,10 +120,10 @@ int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 /*jack code*/
-static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process);
+static int add_process_to_list(struct kvm_vcpu *vcpu,u32 next_process,u32 targetpid);
 static int get_proname_by_path(struct kvm_vcpu *vcpu,u32 next_process,hva_t *pro_name);
 static int get_curr_apc_processName(struct kvm_vcpu *vcpu,u32 *curr_processadd,char *pname,u32 *apcadd,u32 *belongprocess);
-static int get_process_list_by_handle(struct kvm_vcpu *vcpu);
+ int get_process_list_by_handletable(struct kvm_vcpu *vcpu,u32 targetpid);
 static int get_curr_processName(struct kvm_vcpu *vcpu,char *pname,u32 *processadd);
 static int foreach_process_list(struct list_head *head);
 static int insert_list(struct list_head *head,struct list_head *node);

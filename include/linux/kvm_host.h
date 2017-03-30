@@ -408,7 +408,7 @@ typedef struct _Vm_Info{
 typedef struct _Se_Process{
 	struct list_head pro_list;
 	char image_name[30];
-	u32 DirectoryBase;
+	u32 count;
 	union{
 		int pro_id;
 		int pro_count;
@@ -417,7 +417,11 @@ typedef struct _Se_Process{
 /*receive VM process info from Hyper call*/
 typedef struct process_info
 {
-	int processID;
+	struct list_head pro_list;
+	 union{
+                int pro_id;
+                int pro_count;
+        }u1;
 	char image_name[30];
 }ProcessInfo;
 
@@ -475,15 +479,18 @@ struct kvm {
 	struct list_head devices;
 /*jack code*/
 	u32 kpcrbase;
+	u32 nonpagebase;
 	ServiceDescriptorTableEntry_t *service_table;/*jack code*/
 	spinlock_t alloc_lock;/*jack code*/
 	unsigned int ret_add;
+	int gloflag;
 	int is_svm;
 	int is_alloc;/*jack code*/
 	int process_dirty;
 	 VmInfo vm_info;
 	SeProcess normal_pro_list;
 	SeProcess se_pro_list;
+	ProcessInfo true_process_list;
 	SysenterEip sysenter_eip;
 /*jack code*/
 };
